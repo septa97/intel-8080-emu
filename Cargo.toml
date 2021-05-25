@@ -1,5 +1,5 @@
 [package]
-name = "intel-8080-emu-space-invaders"
+name = "intel-8080-emu"
 version = "0.1.0"
 authors = ["septa97 <jancharles.adona@gmail.com>"]
 edition = "2018"
