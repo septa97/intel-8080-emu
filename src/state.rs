@@ -6,7 +6,7 @@ struct ConditionCodes {
     s: u8,
     p: u8,
     cy: u8,
-    ac: u8,
+    ac: u8, // Space Invaders doesn't use this
     pad: u8,
 }
 
@@ -25,8 +25,32 @@ struct State8080 {
     int_enable: u8, // TODO: figure out what this is
 }
 
-fn parity(num: u8) -> u8 {
+fn get_z(num: u8) -> u8 {
+    if num == 0 {
+        1
+    } else {
+        0
+    }
+}
+
+fn get_s(num: u8) -> u8 {
+    if num >> 7 == 1 {
+        1
+    } else {
+        0
+    }
+}
+
+fn get_p(num: u8) -> u8 {
     if num % 2 == 0 {
+        1
+    } else {
+        0
+    }
+}
+
+fn get_cy(has_overflowed: bool) -> u8 {
+    if has_overflowed {
         1
     } else {
         0
@@ -38,29 +62,11 @@ impl State8080 {
     fn add(&mut self, lhs: u8, rhs: u8) -> u8 {
         let (ans, has_overflowed) = lhs.overflowing_add(rhs);
 
-        // Z flag
-        if ans == 0 {
-            self.cc.z = 1;
-        } else {
-            self.cc.z = 0;
-        }
-
-        // S flag
-        if ans >> 7 == 1 {
-            self.cc.s = 1;
-        } else {
-            self.cc.s = 0;
-        }
-
-        // CY flag
-        if has_overflowed {
-            self.cc.cy = 1;
-        } else {
-            self.cc.cy = 0;
-        }
-
-        // P flag
-        self.cc.p = parity(ans & 0xFF);
+        // flags
+        self.cc.z = get_z(ans);
+        self.cc.s = get_s(ans);
+        self.cc.p = get_p(ans & 0xFF);
+        self.cc.cy = get_cy(has_overflowed);
 
         ans
     }
@@ -69,29 +75,11 @@ impl State8080 {
     fn adc(&mut self, lhs: u8, rhs: u8) -> u8 {
         let (ans, has_overflowed) = lhs.overflowing_add(rhs);
 
-        // Z flag
-        if ans == 0 {
-            self.cc.z = 1;
-        } else {
-            self.cc.z = 0;
-        }
-
-        // S flag
-        if ans >> 7 == 1 {
-            self.cc.s = 1;
-        } else {
-            self.cc.s = 0;
-        }
-
-        // CY flag
-        if has_overflowed {
-            self.cc.cy = 1;
-        } else {
-            self.cc.cy = 0;
-        }
-
-        // P flag
-        self.cc.p = parity(ans & 0xFF);
+        // flags
+        self.cc.z = get_z(ans);
+        self.cc.s = get_s(ans);
+        self.cc.p = get_p(ans & 0xFF);
+        self.cc.cy = get_cy(has_overflowed);
 
         ans + self.cc.cy // TODO: maybe this will overflow?
     }
@@ -100,69 +88,53 @@ impl State8080 {
     fn sub(&mut self, lhs: u8, rhs: u8) -> u8 {
         let (ans, has_overflowed) = lhs.overflowing_sub(rhs);
 
-        // Z flag
-        if ans == 0 {
-            self.cc.z = 1;
-        } else {
-            self.cc.z = 0;
-        }
-
-        // S flag
-        if ans >> 7 == 1 {
-            self.cc.s = 1;
-        } else {
-            self.cc.s = 0;
-        }
-
-        // CY flag
-        if has_overflowed {
-            self.cc.cy = 1;
-        } else {
-            self.cc.cy = 0;
-        }
-
-        // P flag
-        self.cc.p = parity(ans & 0xFF);
+        // flags
+        self.cc.z = get_z(ans);
+        self.cc.s = get_s(ans);
+        self.cc.p = get_p(ans & 0xFF);
+        self.cc.cy = get_cy(has_overflowed);
 
         ans
     }
 
-    // for SBB instructions
+    // for SBB (and SBI) instructions
     fn sbb(&mut self, lhs: u8, rhs: u8) -> u8 {
         let (ans, has_overflowed) = lhs.overflowing_sub(rhs);
 
-        // Z flag
-        if ans == 0 {
-            self.cc.z = 1;
-        } else {
-            self.cc.z = 0;
-        }
-
-        // S flag
-        if ans >> 7 == 1 {
-            self.cc.s = 1;
-        } else {
-            self.cc.s = 0;
-        }
-
-        // CY flag
-        if has_overflowed {
-            self.cc.cy = 1;
-        } else {
-            self.cc.cy = 0;
-        }
-
-        // P flag
-        self.cc.p = parity(ans & 0xFF);
+        // flags
+        self.cc.z = get_z(ans);
+        self.cc.s = get_s(ans);
+        self.cc.p = get_p(ans & 0xFF);
+        self.cc.cy = get_cy(has_overflowed);
 
         ans - self.cc.cy // TODO: maybe this will overflow?
+    }
+
+    // update `b` and `c`
+    fn update_bc(&mut self, bc: u16) {
+        self.c = bc as u8; // this should JUST truncate the higher byte
+        self.b = (bc >> 8) as u8;
+    }
+
+    // update `d` and `e`
+    fn update_de(&mut self, de: u16) {
+        self.e = de as u8;
+        self.d = (de >> 8) as u8;
+    }
+
+    // update `h` and `l`
+    fn update_hl(&mut self, hl: u16) {
+        self.l = hl as u8;
+        self.h = (hl >> 8) as u8;
     }
 
     fn emulate_cycle(&mut self) {
         // fetch opcode
         let pc = self.pc as usize;
         let opcode = self.memory[pc];
-        let hl = ((self.h as usize) << 8) | self.l as usize; // TODO: research more on `.into()`
+        let bc = ((self.b as usize) << 8) | self.c as usize; // TODO: research more on `.into()`
+        let de = ((self.d as usize) << 8) | self.e as usize;
+        let hl = ((self.h as usize) << 8) | self.l as usize;
 
         match opcode {
             // NOP
@@ -173,9 +145,269 @@ impl State8080 {
                 self.b = self.memory[pc + 2];
                 self.pc += 2;
             }
+            // TODO: maybe separate this from this group? `assignment group` maybe or something like that?
             // STAX B
-            0x02 => {
-                // TODO:
+            0x02 => self.memory[bc] = self.a,
+            // INX B
+            0x03 => {
+                let (new_bc, _) = (bc as u16).overflowing_add(1);
+
+                self.update_bc(new_bc);
+            }
+            // INR B
+            0x04 => {
+                let (new_b, _) = self.b.overflowing_add(1);
+
+                // flags
+                self.cc.z = get_z(new_b);
+                self.cc.s = get_s(new_b);
+                self.cc.p = get_p(new_b);
+
+                self.b = new_b;
+            }
+            // DCR B
+            0x05 => {
+                let (new_b, _) = self.b.overflowing_sub(1);
+
+                // flags
+                self.cc.z = get_z(new_b);
+                self.cc.s = get_s(new_b);
+                self.cc.p = get_p(new_b);
+
+                self.b = new_b;
+            }
+            // DAD B
+            0x09 => {
+                let (new_hl, has_overflowed) = (hl as u16).overflowing_add(bc as u16);
+
+                // flags
+                self.cc.cy = get_cy(has_overflowed);
+
+                self.update_hl(new_hl);
+            }
+            // DCX B
+            0x0B => {
+                let new_bc = (bc as u16) - 1;
+                self.c = new_bc as u8; // this should JUST truncate the higher byte
+                self.b = (new_bc >> 8) as u8;
+            }
+            // INR C
+            0x0C => {
+                let (new_c, _) = self.c.overflowing_add(1);
+
+                // flags
+                self.cc.z = get_z(new_c);
+                self.cc.s = get_s(new_c);
+                self.cc.p = get_p(new_c);
+
+                self.c = new_c;
+            }
+            // DCR C
+            0x0D => {
+                let (new_c, _) = self.c.overflowing_sub(1);
+
+                // flags
+                self.cc.z = get_z(new_c);
+                self.cc.s = get_s(new_c);
+                self.cc.p = get_p(new_c);
+
+                self.c = new_c;
+            }
+            // INX D
+            0x13 => {
+                let (new_de, _) = (de as u16).overflowing_add(1);
+
+                self.update_de(new_de);
+            }
+            // INR D
+            0x14 => {
+                let (new_d, _) = self.d.overflowing_add(1);
+
+                // flags
+                self.cc.z = get_z(new_d);
+                self.cc.s = get_s(new_d);
+                self.cc.p = get_p(new_d);
+
+                self.d = new_d;
+            }
+            // DCR D
+            0x15 => {
+                let (new_d, _) = self.d.overflowing_sub(1);
+
+                // flags
+                self.cc.z = get_z(new_d);
+                self.cc.s = get_s(new_d);
+                self.cc.p = get_p(new_d);
+
+                self.d = new_d;
+            }
+            // DAD D
+            0x19 => {
+                let (new_hl, has_overflowed) = (hl as u16).overflowing_add(de as u16);
+
+                // flags
+                self.cc.cy = get_cy(has_overflowed);
+
+                self.update_hl(new_hl);
+            }
+            // DCX D
+            0x1B => {
+                let new_de = (de as u16) - 1;
+                self.e = new_de as u8; // this should JUST truncate the higher byte
+                self.d = (new_de >> 8) as u8;
+            }
+            // INR E
+            0x1C => {
+                let (new_e, _) = self.e.overflowing_add(1);
+
+                // flags
+                self.cc.z = get_z(new_e);
+                self.cc.s = get_s(new_e);
+                self.cc.p = get_p(new_e);
+
+                self.e = new_e;
+            }
+            // DCR E
+            0x1D => {
+                let (new_e, _) = self.e.overflowing_sub(1);
+
+                // flags
+                self.cc.z = get_z(new_e);
+                self.cc.s = get_s(new_e);
+                self.cc.p = get_p(new_e);
+
+                self.e = new_e;
+            }
+            // INX H
+            0x23 => {
+                let (new_hl, _) = (hl as u16).overflowing_add(1);
+
+                self.update_hl(new_hl);
+            }
+            // INR H
+            0x24 => {
+                let (new_h, _) = self.h.overflowing_add(1);
+
+                // flags
+                self.cc.z = get_z(new_h);
+                self.cc.s = get_s(new_h);
+                self.cc.p = get_p(new_h);
+
+                self.h = new_h;
+            }
+            // DCR H
+            0x25 => {
+                let (new_h, _) = self.h.overflowing_sub(1);
+
+                // flags
+                self.cc.z = get_z(new_h);
+                self.cc.s = get_s(new_h);
+                self.cc.p = get_p(new_h);
+
+                self.h = new_h;
+            }
+            // DAD H
+            0x29 => {
+                let hl_u16 = hl as u16;
+                let (new_hl, has_overflowed) = hl_u16.overflowing_add(hl_u16); // TODO: not sure if emulator101.com has a typo but I'm assuming it's `HL` and not `HI`
+
+                // flags
+                self.cc.cy = get_cy(has_overflowed);
+
+                self.update_hl(new_hl);
+            }
+            // DCX H
+            0x2B => {
+                let new_hl = (hl as u16) - 1;
+                self.l = new_hl as u8; // this should JUST truncate the higher byte
+                self.h = (new_hl >> 8) as u8;
+            }
+            // INR L
+            0x2C => {
+                let (new_l, _) = self.l.overflowing_add(1);
+
+                // flags
+                self.cc.z = get_z(new_l);
+                self.cc.s = get_s(new_l);
+                self.cc.p = get_p(new_l);
+
+                self.l = new_l;
+            }
+            // DCR L
+            0x2D => {
+                let (new_l, _) = self.l.overflowing_sub(1);
+
+                // flags
+                self.cc.z = get_z(new_l);
+                self.cc.s = get_s(new_l);
+                self.cc.p = get_p(new_l);
+
+                self.l = new_l;
+            }
+            // INX SP
+            0x33 => {
+                let (new_sp, _) = self.sp.overflowing_add(1);
+
+                self.sp = new_sp;
+            }
+            // INR M
+            0x34 => {
+                let (new_hl_mem, _) = self.memory[hl].overflowing_add(1);
+
+                // flags
+                self.cc.z = get_z(new_hl_mem);
+                self.cc.s = get_s(new_hl_mem);
+                self.cc.p = get_p(new_hl_mem);
+
+                self.memory[hl] = new_hl_mem;
+            }
+            // DCR M
+            0x35 => {
+                let (new_hl_mem, _) = self.memory[hl].overflowing_sub(1);
+
+                // flags
+                self.cc.z = get_z(new_hl_mem);
+                self.cc.s = get_s(new_hl_mem);
+                self.cc.p = get_p(new_hl_mem);
+
+                self.memory[hl] = new_hl_mem;
+            }
+            // DAD SP
+            0x39 => {
+                let (new_hl, has_overflowed) = (hl as u16).overflowing_add(self.sp); // TODO: verify if `SP` is correct
+
+                // flags
+                self.cc.cy = get_cy(has_overflowed);
+
+                self.update_hl(new_hl);
+            }
+            // DCX SP
+            0x3B => {
+                let (new_sp, _) = self.sp.overflowing_sub(1);
+
+                self.sp = new_sp;
+            }
+            // INR A
+            0x3C => {
+                let (new_a, _) = self.a.overflowing_add(1);
+
+                // flags
+                self.cc.z = get_z(new_a);
+                self.cc.s = get_s(new_a);
+                self.cc.p = get_p(new_a);
+
+                self.a = new_a;
+            }
+            // DCR A
+            0x3D => {
+                let (new_a, _) = self.a.overflowing_sub(1);
+
+                // flags
+                self.cc.z = get_z(new_a);
+                self.cc.s = get_s(new_a);
+                self.cc.p = get_p(new_a);
+
+                self.a = new_a;
             }
             0x41 => self.b = self.c,                            // MOV B,C
             0x42 => self.b = self.d,                            // MOV B,D
