@@ -132,7 +132,7 @@ pub fn disassemble(file_path: &String) -> Result<(), Box<dyn Error>> {
                 pc += 1;
             }
             0x20 => {
-                println!("RIM");
+                println!("NOP/RIM"); // NOP in 8080, RIM in 8085
                 pc += 1;
             }
             0x21 => {
@@ -140,8 +140,8 @@ pub fn disassemble(file_path: &String) -> Result<(), Box<dyn Error>> {
                 pc += 3;
             }
             0x22 => {
-                println!("SHLD  ${:02x}", buffer[pc + 1]);
-                pc += 2;
+                println!("SHLD  ${:02x}{:02x}", buffer[pc + 2], buffer[pc + 1]);
+                pc += 3;
             }
             0x23 => {
                 println!("INX   H");
@@ -192,7 +192,7 @@ pub fn disassemble(file_path: &String) -> Result<(), Box<dyn Error>> {
                 pc += 1;
             }
             0x30 => {
-                println!("SIM");
+                println!("NOP/SIM"); // NOP in 8080, SIM in 8085
                 pc += 1;
             }
             0x31 => {
