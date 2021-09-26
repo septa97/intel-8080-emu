@@ -1,6 +1,6 @@
 const MEMORY_SIZE: usize = 65_536; // 2 ^ 16, 16-bit addresses
 
-// TODO: default values? check emulator101.com code for more info on `z:1`, etc.
+// on `z:1`, the `:1` is a bit field!
 struct ConditionCodes {
     z: u8,
     s: u8,
@@ -131,23 +131,269 @@ impl State8080 {
     fn emulate_cycle(&mut self) {
         // fetch opcode
         let pc = self.pc as usize;
+        let sp = self.sp as usize;
         let opcode = self.memory[pc];
         let bc = ((self.b as usize) << 8) | self.c as usize; // TODO: research more on `.into()`
         let de = ((self.d as usize) << 8) | self.e as usize;
         let hl = ((self.h as usize) << 8) | self.l as usize;
+        // TODO: find an idiomatic way for reusing these values
+        // let pc_1_u16_opt = None;
+        // let pc_2_u16_opt = None;
+
+        // if pc + 1 < self.memory.len() {
+        //     pc_1_u16_opt = Some(self.memory[pc+1] as u16);
+        // }
+
+        // if pc + 2 < self.memory.len() {
+        //     pc_2_u16_opt = Some((self.memory[pc+2] as u16) << 8);
+        // }
 
         match opcode {
-            // NOP
-            0x00 | 0x08 | 0x10 | 0x18 | 0x28 | 0x38 | 0xCB | 0xD9 | 0xDD | 0xED | 0xFD => (),
-            // LXI B,D16
+            // ---- stack, I/O, and machine control group ----
+            0x00 => (), // NOP
+            // HLT
+            0x76 => {
+                panic!("HLT was executed");
+            }
+            // POP B
+            0xC1 => {
+                self.c = self.memory[sp];
+                self.b = self.memory[sp + 1];
+                self.sp += 2;
+            }
+            // PUSH B
+            0xC5 => {
+                self.memory[sp - 2] = self.c;
+                self.memory[sp - 1] = self.b;
+                self.sp -= 2;
+            }
+            // POP D
+            0xD1 => {
+                self.e = self.memory[sp];
+                self.d = self.memory[sp + 1];
+                self.sp += 2;
+            }
+            0xD3 => (), // OUT d8 (special)
+            // PUSH D
+            0xD5 => {
+                self.memory[sp - 2] = self.e;
+                self.memory[sp - 1] = self.d;
+                self.sp -= 2;
+            }
+            0xDB => (), // IN d8 (special)
+            // POP H
+            0xE1 => {
+                self.l = self.memory[sp];
+                self.h = self.memory[sp + 1];
+                self.sp += 2;
+            }
+            // XTHL (swap (SP) with HL)
+            0xE3 => {
+                let temp_high = self.memory[sp + 1];
+                let temp_low = self.memory[sp];
+                self.memory[sp + 1] = self.h;
+                self.memory[sp] = self.l;
+                self.h = temp_high;
+                self.l = temp_low;
+            }
+            // PUSH H
+            0xE5 => {
+                self.memory[sp - 2] = self.l;
+                self.memory[sp - 1] = self.h;
+                self.sp -= 2;
+            }
+            // POP PSW
+            0xF1 => {
+                let flags = self.memory[sp];
+
+                self.cc.s = (flags & 0x80) >> 7;
+                self.cc.z = (flags & 0x40) >> 6;
+                self.cc.p = (flags & 0x04) >> 2;
+                self.cc.cy = flags & 0x01;
+
+                self.a = self.memory[sp + 1];
+                self.sp += 2;
+            }
+            0xF3 => (), // DI (special)
+            // PUSH PSW
+            0xF5 => {
+                let flags = (self.cc.s << 7) | (self.cc.z << 6) | (self.cc.p << 2) | (self.cc.cy);
+
+                self.memory[sp - 2] = flags;
+                self.memory[sp - 1] = self.a;
+                self.sp -= 2;
+            }
+            0xF9 => self.sp = hl as u16, // SPHL
+            0xFB => (),                  // EI (special)
+            // ---- illegal/undocumented group ----
+            0x08 | 0x10 | 0x18 | 0x20 | 0x28 | 0x30 | 0x38 | 0xCB | 0xD9 | 0xDD | 0xED | 0xFD => (),
+            // ---- data transfer group ----
+            // LXI B,d16
             0x01 => {
                 self.c = self.memory[pc + 1];
                 self.b = self.memory[pc + 2];
                 self.pc += 2;
             }
-            // TODO: maybe separate this from this group? `assignment group` maybe or something like that?
-            // STAX B
-            0x02 => self.memory[bc] = self.a,
+            0x02 => self.memory[bc] = self.a, // STAX B
+            // MVI B,d8
+            0x06 => {
+                self.b = self.memory[pc + 1];
+                self.pc += 1;
+            }
+            0x0A => self.a = self.memory[bc], // LDAX B
+            // MVI C,d8
+            0x0E => {
+                self.c = self.memory[pc + 1];
+                self.pc += 1;
+            }
+            // LXI D,d16
+            0x11 => {
+                self.e = self.memory[pc + 1];
+                self.d = self.memory[pc + 2];
+                self.pc += 2;
+            }
+            0x12 => self.memory[de] = self.a, // STAX D
+            // MVI D,d8
+            0x16 => {
+                self.d = self.memory[pc + 1];
+                self.pc += 1;
+            }
+            0x1A => self.a = self.memory[de], // LDAX D
+            // MVI E,d8
+            0x1E => {
+                self.e = self.memory[pc + 1];
+                self.pc += 1;
+            }
+            // LXI H,d16
+            0x21 => {
+                self.l = self.memory[pc + 1];
+                self.h = self.memory[pc + 2];
+                self.pc += 2;
+            }
+            // SHLD a16
+            0x22 => {
+                self.memory[pc + 1] = self.l;
+                self.memory[pc + 2] = self.h;
+                self.pc += 2;
+            }
+            // MVI H,d8
+            0x26 => {
+                self.h = self.memory[pc + 1];
+                self.pc += 1;
+            }
+            // LHLD D
+            0x2A => {
+                self.l = self.memory[pc + 1];
+                self.h = self.memory[pc + 2];
+                self.pc += 2;
+            }
+            // MVI L,d8
+            0x2E => {
+                self.l = self.memory[pc + 1];
+                self.pc += 1;
+            }
+            // LXI SP,d16
+            0x31 => {
+                let value = ((self.memory[pc + 2] as u16) << 8) | (self.memory[pc + 1] as u16);
+                self.sp = value;
+                self.pc += 2;
+            }
+            // STA a16
+            0x32 => {
+                // TODO: is this really a 3-byte instruction even though only 2 was used?
+                self.memory[pc + 1] = self.a;
+                self.pc += 2;
+            }
+            // MVI M,d8
+            0x36 => {
+                // `M` is memory location pointed by `HL` pair
+                self.memory[hl] = self.memory[pc + 1];
+                self.pc += 1;
+            }
+            // LDA a16
+            0x3A => {
+                // TODO: same with `0x32`, is this really a 3-byte instruction even though onlt 2 was used?
+                self.a = self.memory[pc + 1];
+                self.pc += 2;
+            }
+            // MVI A,d8
+            0x3E => {
+                self.a = self.memory[pc + 1];
+                self.pc += 1;
+            }
+            0x40 => self.b = self.b, // MOV B,B (does this makes sense to implement???)
+            0x41 => self.b = self.c, // MOV B,C
+            0x42 => self.b = self.d, // MOV B,D
+            0x43 => self.b = self.e, // MOV B,E
+            0x44 => self.b = self.h, // MOV B,H
+            0x45 => self.b = self.l, // MOV B,L
+            0x46 => self.b = self.memory[hl], // MOV B,M (move to B the value at memory[HL])
+            0x47 => self.b = self.a, // MOV B,A
+            0x48 => self.c = self.b, // MOV C,B
+            0x49 => self.c = self.c, // MOV C,C (does this makes sense to implement???)
+            0x4A => self.c = self.d, // MOV C,D
+            0x4B => self.c = self.e, // MOV C,E
+            0x4C => self.c = self.h, // MOV C,H
+            0x4D => self.c = self.l, // MOV C,L
+            0x4E => self.c = self.memory[hl], // MOV C,M (move to C the value at memory[HL])
+            0x4F => self.c = self.a, // MOV C,A
+            0x50 => self.d = self.b, // MOV D,B
+            0x51 => self.d = self.c, // MOV D,C
+            0x52 => self.d = self.d, // MOV D,D (does this makes sense to implement???)
+            0x53 => self.d = self.e, // MOV D,E
+            0x54 => self.d = self.h, // MOV D,H
+            0x55 => self.d = self.l, // MOV D,L
+            0x56 => self.d = self.memory[hl], // MOV D,M (move to D the value at memory[HL])
+            0x57 => self.d = self.a, // MOV D,A
+            0x58 => self.e = self.b, // MOV E,B
+            0x59 => self.e = self.c, // MOV E,C
+            0x5A => self.e = self.d, // MOV E,D
+            0x5B => self.e = self.e, // MOV E,E (does this makes sense to implement???)
+            0x5C => self.e = self.h, // MOV E,H
+            0x5D => self.e = self.l, // MOV E,L
+            0x5E => self.e = self.memory[hl], // MOV E,M (move to E the value at memory[HL])
+            0x5F => self.e = self.a, // MOV E,A
+            0x60 => self.h = self.b, // MOV H,B
+            0x61 => self.h = self.c, // MOV H,C
+            0x62 => self.h = self.d, // MOV H,D
+            0x63 => self.h = self.e, // MOV H,E
+            0x64 => self.h = self.h, // MOV H,H (does this makes sense to implement???)
+            0x65 => self.h = self.l, // MOV H,L
+            0x66 => self.h = self.memory[hl], // MOV H,M (move to H the value at memory[HL])
+            0x67 => self.h = self.a, // MOV H,A
+            0x68 => self.l = self.b, // MOV L,B
+            0x69 => self.l = self.c, // MOV L,C
+            0x6A => self.l = self.d, // MOV L,D
+            0x6B => self.l = self.e, // MOV L,E
+            0x6C => self.l = self.h, // MOV L,H
+            0x6D => self.l = self.l, // MOV L,L (does this makes sense to implement???)
+            0x6E => self.l = self.memory[hl], // MOV L,M (move to L the value at memory[HL])
+            0x6F => self.l = self.a, // MOV L,A
+            0x70 => self.memory[hl] = self.b, // MOV M,B
+            0x71 => self.memory[hl] = self.c, // MOV M,C
+            0x72 => self.memory[hl] = self.d, // MOV M,D
+            0x73 => self.memory[hl] = self.e, // MOV M,E
+            0x74 => self.memory[hl] = self.h, // MOV M,H
+            0x75 => self.memory[hl] = self.l, // MOV M,L
+            0x77 => self.memory[hl] = self.a, // MOV M,A
+            0x78 => self.a = self.b, // MOV A,B
+            0x79 => self.a = self.c, // MOV A,C
+            0x7A => self.a = self.d, // MOV A,D
+            0x7B => self.a = self.e, // MOV A,E
+            0x7C => self.a = self.h, // MOV A,H
+            0x7D => self.a = self.l, // MOV A,L
+            0x7E => self.a = self.memory[hl], // MOV A,M
+            0x7F => self.a = self.a, // MOV A,A (does this makes sense to implement???)
+            // XCHG (swap DE and HL)
+            0xEB => {
+                let temp_high = self.h;
+                let temp_low = self.l;
+                self.h = self.d;
+                self.l = self.e;
+                self.d = temp_high;
+                self.e = temp_low;
+            }
+            // ---- arithmetic group ----
             // INX B
             0x03 => {
                 let (new_bc, _) = (bc as u16).overflowing_add(1);
@@ -409,25 +655,22 @@ impl State8080 {
 
                 self.a = new_a;
             }
-            0x41 => self.b = self.c,                            // MOV B,C
-            0x42 => self.b = self.d,                            // MOV B,D
-            0x43 => self.b = self.e,                            // MOV B,E
-            0x80 => self.a = self.add(self.a, self.b),          // ADD B
-            0x81 => self.a = self.add(self.a, self.c),          // ADD C
-            0x82 => self.a = self.add(self.a, self.d),          // ADD D
-            0x83 => self.a = self.add(self.a, self.e),          // ADD E
-            0x84 => self.a = self.add(self.a, self.h),          // ADD H
-            0x85 => self.a = self.add(self.a, self.l),          // ADD L
+            0x80 => self.a = self.add(self.a, self.b), // ADD B
+            0x81 => self.a = self.add(self.a, self.c), // ADD C
+            0x82 => self.a = self.add(self.a, self.d), // ADD D
+            0x83 => self.a = self.add(self.a, self.e), // ADD E
+            0x84 => self.a = self.add(self.a, self.h), // ADD H
+            0x85 => self.a = self.add(self.a, self.l), // ADD L
             0x86 => self.a = self.add(self.a, self.memory[hl]), // ADD M (A = A + (HL))
-            0x87 => self.a = self.add(self.a, self.a),          // ADD A (A = A + A)
-            0x88 => self.a = self.adc(self.a, self.b),          // ADC B
-            0x89 => self.a = self.adc(self.a, self.c),          // ADC C
-            0x8A => self.a = self.adc(self.a, self.d),          // ADC D
-            0x8B => self.a = self.adc(self.a, self.e),          // ADC E
-            0x8C => self.a = self.adc(self.a, self.h),          // ADC H
-            0x8D => self.a = self.adc(self.a, self.l),          // ADC L
+            0x87 => self.a = self.add(self.a, self.a), // ADD A (A = A + A)
+            0x88 => self.a = self.adc(self.a, self.b), // ADC B
+            0x89 => self.a = self.adc(self.a, self.c), // ADC C
+            0x8A => self.a = self.adc(self.a, self.d), // ADC D
+            0x8B => self.a = self.adc(self.a, self.e), // ADC E
+            0x8C => self.a = self.adc(self.a, self.h), // ADC H
+            0x8D => self.a = self.adc(self.a, self.l), // ADC L
             0x8E => self.a = self.adc(self.a, self.memory[hl]), // ADC M (A = A + (HL) + CY)
-            0x8F => self.a = self.adc(self.a, self.a),          // ADC A (A = A + A + CY)
+            0x8F => self.a = self.adc(self.a, self.a), // ADC A (A = A + A + CY)
             0xC6 => self.a = self.add(self.a, self.memory[pc + 1]), // ADI D8 (rhs is an immediate value)
             0xCE => self.a = self.adc(self.a, self.memory[pc + 1]), // ACI D8 (rhs is an immediate value PLUS the carry flag value)
             0x90 => self.a = self.sub(self.a, self.b),              // SUB B
@@ -448,7 +691,497 @@ impl State8080 {
             0x9F => self.a = self.sbb(self.a, self.a),              // SBB A (A = A - A - CY)
             0xD6 => self.a = self.sub(self.a, self.memory[pc + 1]), // SUI D8 (rhs is an immediate value)
             0xDE => self.a = self.sbb(self.a, self.memory[pc + 1]), // SBI D8 (rhs is an immediate value MINUS the carry flag value)
-            _ => panic!("Unknown opcode!"), // uncomment to determine the unimplemented opcodes
+            // ---- logical group ----
+            // RLC
+            0x07 => {
+                let bit_holder = self.a >> 7;
+                self.a <<= 1;
+                self.a |= bit_holder;
+
+                self.cc.cy = bit_holder;
+            }
+            // RRC
+            0x0F => {
+                let bit_holder = self.a & 1;
+                self.a >>= 1;
+                self.a |= bit_holder << 7;
+
+                self.cc.cy = bit_holder;
+            }
+            // RAL
+            0x17 => {
+                let bit_holder = self.a >> 7;
+                self.a <<= 1;
+                self.a |= self.cc.cy;
+
+                self.cc.cy = bit_holder;
+            }
+            // RAR
+            0x1F => {
+                let bit_holder = self.a & 1;
+                self.a >>= 1;
+                self.a |= self.cc.cy << 7;
+
+                self.cc.cy = bit_holder;
+            }
+            0x27 => (),                       // DAA (special)
+            0x2F => self.a = !self.a,         // CMA
+            0x37 => self.cc.cy = 1,           // STC
+            0x3F => self.cc.cy = !self.cc.cy, // CMC
+            0xA0 | 0xA1 | 0xA2 | 0xA3 | 0xA4 | 0xA5 | 0xA6 | 0xA7 => {
+                match opcode {
+                    0xA0 => self.a &= self.b,          // ANA B
+                    0xA1 => self.a &= self.c,          // ANA C
+                    0xA2 => self.a &= self.d,          // ANA D
+                    0xA3 => self.a &= self.e,          // ANA E
+                    0xA4 => self.a &= self.h,          // ANA H
+                    0xA5 => self.a &= self.l,          // ANA L
+                    0xA6 => self.a &= self.memory[hl], // ANA M
+                    0xA7 => self.a &= self.a,          // ANA A (does something happen with this???)
+                    _ => panic!("This shouldn't be reached."),
+                }
+
+                self.cc.z = get_z(self.a);
+                self.cc.s = get_s(self.a);
+                self.cc.p = get_p(self.a);
+                self.cc.cy = get_cy(false);
+            }
+            0xA8 | 0xA9 | 0xAA | 0xAB | 0xAC | 0xAD | 0xAE | 0xAF => {
+                match opcode {
+                    0xA8 => self.a ^= self.b,          // XRA B
+                    0xA9 => self.a ^= self.c,          // XRA C
+                    0xAA => self.a ^= self.d,          // XRA D
+                    0xAB => self.a ^= self.e,          // XRA E
+                    0xAC => self.a ^= self.h,          // XRA H
+                    0xAD => self.a ^= self.l,          // XRA L
+                    0xAE => self.a ^= self.memory[hl], // XRA M
+                    0xAF => self.a ^= self.a,          // XRA A (this is sure 0 right???)
+                    _ => panic!("This shouldn't be reached."),
+                }
+
+                self.cc.z = get_z(self.a);
+                self.cc.s = get_s(self.a);
+                self.cc.p = get_p(self.a);
+                self.cc.cy = get_cy(false);
+            }
+            0xB0 | 0xB1 | 0xB2 | 0xB3 | 0xB4 | 0xB5 | 0xB6 | 0xB7 => {
+                match opcode {
+                    0xB0 => self.a |= self.b,          // ORA B
+                    0xB1 => self.a |= self.c,          // ORA C
+                    0xB2 => self.a |= self.d,          // ORA D
+                    0xB3 => self.a |= self.e,          // ORA E
+                    0xB4 => self.a |= self.h,          // ORA H
+                    0xB5 => self.a |= self.l,          // ORA L
+                    0xB6 => self.a |= self.memory[hl], // ORA M
+                    0xB7 => self.a |= self.a,          // ORA A (does something happen with this???)
+                    _ => panic!("This shouldn't be reached."),
+                }
+
+                self.cc.z = get_z(self.a);
+                self.cc.s = get_s(self.a);
+                self.cc.p = get_p(self.a);
+                self.cc.cy = get_cy(false);
+            }
+            0xB8 | 0xB9 | 0xBA | 0xBB | 0xBC | 0xBD | 0xBE | 0xBF => {
+                let (result, has_overflowed) = match opcode {
+                    0xB0 => self.a.overflowing_sub(self.b),          // CMP B
+                    0xB1 => self.a.overflowing_sub(self.c),          // CMP C
+                    0xB2 => self.a.overflowing_sub(self.d),          // CMP D
+                    0xB3 => self.a.overflowing_sub(self.e),          // CMP E
+                    0xB4 => self.a.overflowing_sub(self.h),          // CMP H
+                    0xB5 => self.a.overflowing_sub(self.l),          // CMP L
+                    0xB6 => self.a.overflowing_sub(self.memory[hl]), // CMP M
+                    0xB7 => self.a.overflowing_sub(self.a), // CMP A (does something happen with this???)
+                    _ => panic!("This shouldn't be reached."),
+                };
+
+                self.cc.z = get_z(result);
+                self.cc.s = get_s(result);
+                self.cc.p = get_p(result);
+                self.cc.cy = get_cy(has_overflowed);
+            }
+            // TODO: maybe compress ANI, XRI, ORI, and CPI?
+            // ANI d8
+            0xE6 => {
+                self.a &= self.memory[pc + 1];
+
+                self.cc.z = get_z(self.a);
+                self.cc.s = get_s(self.a);
+                self.cc.p = get_p(self.a);
+                self.cc.cy = get_cy(false);
+            }
+            // XRI d8
+            0xEE => {
+                self.a ^= self.memory[pc + 1];
+
+                self.cc.z = get_z(self.a);
+                self.cc.s = get_s(self.a);
+                self.cc.p = get_p(self.a);
+                self.cc.cy = get_cy(false);
+            }
+            // ORI d8
+            0xF6 => {
+                self.a |= self.memory[pc + 1];
+
+                self.cc.z = get_z(self.a);
+                self.cc.s = get_s(self.a);
+                self.cc.p = get_p(self.a);
+                self.cc.cy = get_cy(false);
+            }
+            // CPI d8
+            0xFE => {
+                let (result, has_overflowed) = self.a.overflowing_sub(self.memory[pc + 1]);
+
+                self.cc.z = get_z(result);
+                self.cc.s = get_s(result);
+                self.cc.p = get_p(result);
+                self.cc.cy = get_cy(has_overflowed);
+            }
+            // ---- branch group ----
+            // RNZ (if Z is 0, meaning NOT Zero on the arg(see `get_z` function))
+            0xC0 => {
+                if self.cc.z == 0 {
+                    let low = self.memory[sp] as u16;
+                    let high = (self.memory[sp + 1] as u16) << 8;
+                    self.pc = high | low;
+                    self.sp += 2;
+                }
+            }
+            // JNZ adr (if Z is 0, meaning Not Zero(see `get_z` function))
+            0xC2 => {
+                let address = ((self.memory[pc + 2] as u16) << 8) | (self.memory[pc + 1] as u16);
+
+                if self.cc.z == 0 {
+                    self.pc = address;
+                } else {
+                    self.pc += 2;
+                }
+            }
+            // JMP adr
+            0xC3 => {
+                // TODO: repetitive use of `address` on some instructions
+                let address = ((self.memory[pc + 2] as u16) << 8) | (self.memory[pc + 1] as u16);
+
+                self.pc = address;
+            }
+            // CNZ adr (if Z is NOT ZERO, call the address)
+            0xC4 => {
+                let address = ((self.memory[pc + 2] as u16) << 8) | (self.memory[pc + 1] as u16);
+
+                if self.cc.z == 1 {
+                    self.memory[sp - 1] = (self.pc >> 8) as u8;
+                    self.memory[sp - 2] = self.pc as u8;
+                    self.sp -= 2;
+                    self.pc = address;
+                } else {
+                    self.pc += 2;
+                }
+            }
+            // RST 0 (call at address 0b00---000, where --- are values from 0b000 to 0b111, in this case is 0b000)
+            0xC7 => {
+                self.memory[sp - 1] = (self.pc >> 8) as u8;
+                self.memory[sp - 2] = self.pc as u8;
+                self.sp -= 2;
+                self.pc = 0b00000000;
+            }
+            // RZ (if Z is 1, meaning Zero on the arg(see `get_z` function))
+            0xC8 => {
+                if self.cc.z == 1 {
+                    let low = self.memory[sp] as u16;
+                    let high = (self.memory[sp + 1] as u16) << 8;
+                    self.pc = high | low;
+                    self.sp += 2;
+                }
+            }
+            // RET
+            0xC9 => {
+                let low = self.memory[sp] as u16;
+                let high = (self.memory[sp + 1] as u16) << 8;
+                self.pc = high | low;
+                self.sp += 2;
+            }
+            // JZ adr (if Z is NOT 0, meaning Zero on the arg(see `get_z` function))
+            0xCA => {
+                let address = ((self.memory[pc + 2] as u16) << 8) | (self.memory[pc + 1] as u16);
+
+                if self.cc.z != 0 {
+                    self.pc = address;
+                } else {
+                    self.pc += 2;
+                }
+            }
+            // CZ adr (if Z is 0, call the address)
+            0xCC => {
+                let address = ((self.memory[pc + 2] as u16) << 8) | (self.memory[pc + 1] as u16);
+
+                if self.cc.z == 0 {
+                    self.memory[sp - 1] = (self.pc >> 8) as u8;
+                    self.memory[sp - 2] = self.pc as u8;
+                    self.sp -= 2;
+                    self.pc = address;
+                } else {
+                    self.pc += 2;
+                }
+            }
+            // CALL adr
+            0xCD => {
+                let address = ((self.memory[pc + 2] as u16) << 8) | (self.memory[pc + 1] as u16);
+
+                self.memory[sp - 1] = (self.pc >> 8) as u8;
+                self.memory[sp - 2] = self.pc as u8;
+                self.sp -= 2;
+                self.pc = address;
+            }
+            // RST 1 (call at address 0b00---000, where --- are values from 0b000 to 0b111, in this case is 0b001)
+            0xCF => {
+                self.memory[sp - 1] = (self.pc >> 8) as u8;
+                self.memory[sp - 2] = self.pc as u8;
+                self.sp -= 2;
+                self.pc = 0b00001000;
+            }
+            // RNC (if CY is 0)
+            0xD0 => {
+                if self.cc.cy == 0 {
+                    let low = self.memory[sp] as u16;
+                    let high = (self.memory[sp + 1] as u16) << 8;
+                    self.pc = high | low;
+                    self.sp += 2;
+                }
+            }
+            // JNC adr (if CY is cleared)
+            0xD2 => {
+                let address = ((self.memory[pc + 2] as u16) << 8) | (self.memory[pc + 1] as u16);
+
+                if self.cc.cy == 0 {
+                    self.pc = address;
+                } else {
+                    self.pc += 2;
+                }
+            }
+            // CNC adr (if CY is ZERO, call the address)
+            0xD4 => {
+                let address = ((self.memory[pc + 2] as u16) << 8) | (self.memory[pc + 1] as u16);
+
+                if self.cc.cy == 0 {
+                    self.memory[sp - 1] = (self.pc >> 8) as u8;
+                    self.memory[sp - 2] = self.pc as u8;
+                    self.sp -= 2;
+                    self.pc = address;
+                } else {
+                    self.pc += 2;
+                }
+            }
+            // RST 2 (call at address 0b00---000, where --- are values from 0b000 to 0b111, in this case is 0b010)
+            0xD7 => {
+                self.memory[sp - 1] = (self.pc >> 8) as u8;
+                self.memory[sp - 2] = self.pc as u8;
+                self.sp -= 2;
+                self.pc = 0b00010000;
+            }
+            // RC (if CY is 1)
+            0xD8 => {
+                if self.cc.cy == 1 {
+                    let low = self.memory[sp] as u16;
+                    let high = (self.memory[sp + 1] as u16) << 8;
+                    self.pc = high | low;
+                    self.sp += 2;
+                }
+            }
+            // JC adr (if CY is NOT cleared)
+            0xDA => {
+                let address = ((self.memory[pc + 2] as u16) << 8) | (self.memory[pc + 1] as u16);
+
+                if self.cc.cy != 0 {
+                    self.pc = address;
+                } else {
+                    self.pc += 2;
+                }
+            }
+            // CC adr (if CY is NOT ZERO, call the address)
+            0xDC => {
+                let address = ((self.memory[pc + 2] as u16) << 8) | (self.memory[pc + 1] as u16);
+
+                if self.cc.cy == 1 {
+                    self.memory[sp - 1] = (self.pc >> 8) as u8;
+                    self.memory[sp - 2] = self.pc as u8;
+                    self.sp -= 2;
+                    self.pc = address;
+                } else {
+                    self.pc += 2;
+                }
+            }
+            // RST 3 (call at address 0b00---000, where --- are values from 0b000 to 0b111, in this case is 0b011)
+            0xDF => {
+                self.memory[sp - 1] = (self.pc >> 8) as u8;
+                self.memory[sp - 2] = self.pc as u8;
+                self.sp -= 2;
+                self.pc = 0b00011000;
+            }
+            // RPO (if P is 0, meaning odd)
+            0xE0 => {
+                if self.cc.p == 0 {
+                    let low = self.memory[sp] as u16;
+                    let high = (self.memory[sp + 1] as u16) << 8;
+                    self.pc = high | low;
+                    self.sp += 2;
+                }
+            }
+            // JPO adr (if P is odd)
+            0xE2 => {
+                let address = ((self.memory[pc + 2] as u16) << 8) | (self.memory[pc + 1] as u16);
+
+                if self.cc.p == 0 {
+                    self.pc = address;
+                } else {
+                    self.pc += 2;
+                }
+            }
+            // CPO adr (if P is 0, meaning odd, call the address)
+            0xE4 => {
+                let address = ((self.memory[pc + 2] as u16) << 8) | (self.memory[pc + 1] as u16);
+
+                if self.cc.p == 0 {
+                    self.memory[sp - 1] = (self.pc >> 8) as u8;
+                    self.memory[sp - 2] = self.pc as u8;
+                    self.sp -= 2;
+                    self.pc = address;
+                } else {
+                    self.pc += 2;
+                }
+            }
+            // RST 4 (call at address 0b00---000, where --- are values from 0b000 to 0b111, in this case is 0b100)
+            0xE7 => {
+                self.memory[sp - 1] = (self.pc >> 8) as u8;
+                self.memory[sp - 2] = self.pc as u8;
+                self.sp -= 2;
+                self.pc = 0b00100000;
+            }
+            // RPE (if P is 1, meaning even)
+            0xE8 => {
+                if self.cc.p == 1 {
+                    let low = self.memory[sp] as u16;
+                    let high = (self.memory[sp + 1] as u16) << 8;
+                    self.pc = high | low;
+                    self.sp += 2;
+                }
+            }
+            // PCHL
+            0xE9 => {
+                self.memory[sp - 1] = (self.pc >> 8) as u8;
+                self.memory[sp - 2] = self.pc as u8;
+                self.sp -= 2;
+                self.pc = hl as u16;
+            }
+            // JPE adr (if P is even)
+            0xEA => {
+                let address = ((self.memory[pc + 2] as u16) << 8) | (self.memory[pc + 1] as u16);
+
+                if self.cc.p == 1 {
+                    self.pc = address;
+                } else {
+                    self.pc += 2;
+                }
+            }
+            // CPE adr (if P is 1, meaning even, call the address)
+            0xEC => {
+                let address = ((self.memory[pc + 2] as u16) << 8) | (self.memory[pc + 1] as u16);
+
+                if self.cc.p == 1 {
+                    self.memory[sp - 1] = (self.pc >> 8) as u8;
+                    self.memory[sp - 2] = self.pc as u8;
+                    self.sp -= 2;
+                    self.pc = address;
+                } else {
+                    self.pc += 2;
+                }
+            }
+            // RST 5 (call at address 0b00---000, where --- are values from 0b000 to 0b111, in this case is 0b101)
+            0xEF => {
+                self.memory[sp - 1] = (self.pc >> 8) as u8;
+                self.memory[sp - 2] = self.pc as u8;
+                self.sp -= 2;
+                self.pc = 0b00101000;
+            }
+            // RP (if S is 0, meaning positive)
+            0xF0 => {
+                if self.cc.s == 0 {
+                    let low = self.memory[sp] as u16;
+                    let high = (self.memory[sp + 1] as u16) << 8;
+                    self.pc = high | low;
+                    self.sp += 2;
+                }
+            }
+            // JP adr (jump if positive)
+            0xF2 => {
+                let address = ((self.memory[pc + 2] as u16) << 8) | (self.memory[pc + 1] as u16);
+
+                // if S is 0, meaning positive
+                if self.cc.s == 0 {
+                    self.pc = address;
+                } else {
+                    self.pc += 2;
+                }
+            }
+            // CP adr (if S is 0, meaning positive, call the address)
+            0xF4 => {
+                let address = ((self.memory[pc + 2] as u16) << 8) | (self.memory[pc + 1] as u16);
+
+                if self.cc.s == 0 {
+                    self.memory[sp - 1] = (self.pc >> 8) as u8;
+                    self.memory[sp - 2] = self.pc as u8;
+                    self.sp -= 2;
+                    self.pc = address;
+                } else {
+                    self.pc += 2;
+                }
+            }
+            // RST 6 (call at address 0b00---000, where --- are values from 0b000 to 0b111, in this case is 0b110)
+            0xF7 => {
+                self.memory[sp - 1] = (self.pc >> 8) as u8;
+                self.memory[sp - 2] = self.pc as u8;
+                self.sp -= 2;
+                self.pc = 0b00110000;
+            }
+            // RM (if S is 1, meaning Minus/negative)
+            0xF8 => {
+                if self.cc.s == 1 {
+                    let low = self.memory[sp] as u16;
+                    let high = (self.memory[sp + 1] as u16) << 8;
+                    self.pc = high | low;
+                    self.sp += 2;
+                }
+            }
+            // JM adr (jump if minus/negative)
+            0xFA => {
+                let address = ((self.memory[pc + 2] as u16) << 8) | (self.memory[pc + 1] as u16);
+
+                // if S is 1, meaning negative
+                if self.cc.s == 1 {
+                    self.pc = address;
+                } else {
+                    self.pc += 2;
+                }
+            }
+            // CM adr (if S is 1, meaning Minus/negative, call the address)
+            0xFC => {
+                let address = ((self.memory[pc + 2] as u16) << 8) | (self.memory[pc + 1] as u16);
+
+                if self.cc.s == 1 {
+                    self.memory[sp - 1] = (self.pc >> 8) as u8;
+                    self.memory[sp - 2] = self.pc as u8;
+                    self.sp -= 2;
+                    self.pc = address;
+                } else {
+                    self.pc += 2;
+                }
+            }
+            // RST 7 (call at address 0b00---000, where --- are values from 0b000 to 0b111, in this case is 0b111)
+            0xFF => {
+                self.memory[sp - 1] = (self.pc >> 8) as u8;
+                self.memory[sp - 2] = self.pc as u8;
+                self.sp -= 2;
+                self.pc = 0b00111000;
+            } // _ => panic!("Unknown opcode!"), // TODO: uncomment to determine the unimplemented opcodes
         }
 
         self.pc += 1;
