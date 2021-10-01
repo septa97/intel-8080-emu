@@ -784,14 +784,14 @@ impl State8080 {
             }
             0xB8 | 0xB9 | 0xBA | 0xBB | 0xBC | 0xBD | 0xBE | 0xBF => {
                 let (result, has_overflowed) = match opcode {
-                    0xB0 => self.a.overflowing_sub(self.b),          // CMP B
-                    0xB1 => self.a.overflowing_sub(self.c),          // CMP C
-                    0xB2 => self.a.overflowing_sub(self.d),          // CMP D
-                    0xB3 => self.a.overflowing_sub(self.e),          // CMP E
-                    0xB4 => self.a.overflowing_sub(self.h),          // CMP H
-                    0xB5 => self.a.overflowing_sub(self.l),          // CMP L
-                    0xB6 => self.a.overflowing_sub(self.memory[hl]), // CMP M
-                    0xB7 => self.a.overflowing_sub(self.a), // CMP A (does something happen with this???)
+                    0xB8 => self.a.overflowing_sub(self.b),          // CMP B
+                    0xB9 => self.a.overflowing_sub(self.c),          // CMP C
+                    0xBA => self.a.overflowing_sub(self.d),          // CMP D
+                    0xBB => self.a.overflowing_sub(self.e),          // CMP E
+                    0xBC => self.a.overflowing_sub(self.h),          // CMP H
+                    0xBD => self.a.overflowing_sub(self.l),          // CMP L
+                    0xBE => self.a.overflowing_sub(self.memory[hl]), // CMP M
+                    0xBF => self.a.overflowing_sub(self.a), // CMP A (does something happen with this???)
                     _ => panic!("This shouldn't be reached."),
                 };
 
