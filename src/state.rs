@@ -115,7 +115,7 @@ impl State8080 {
 
     pub fn init(&mut self) {
         self.pc = 0x100;
-        self.memory[7] = 0xC9;
+        self.memory[5] = 0xC9;
 
         // TODO: For cpudiag.bin testing only
         // self.memory[0] = 0xC3;
@@ -129,13 +129,13 @@ impl State8080 {
         // self.memory[0x59E] = 0x05;
 
         // TODO: what initial value of SP
-        self.sp = 0xF000;
+        // self.sp = 0xF000;
     }
 
     pub fn load_rom(&mut self, file_path: &String) -> Result<(), io::Error> {
         let mut file = File::open(file_path)?;
         let mut buffer = Vec::new();
-        // TODO: maybe use prelude for this?
+        // need `std::io::Read`
         let bytes = file.read_to_end(&mut buffer)?;
 
         println!("rom size: {} bytes", bytes);
@@ -236,7 +236,11 @@ impl State8080 {
         let idx_sp_sub1 = self.sp.wrapping_sub(1) as usize;
         let idx_sp_sub2 = self.sp.wrapping_sub(2) as usize;
 
-        // println!("opcode {:02x}", opcode);
+        // FOR DEBUGGING PURPOSES ONLY
+        println!("opcode: {:02x}, pc: {:04x}, sp: {:04x}, a: {:02x}, b: {:02x}, c: {:02x}, d: {:02x}, e: {:02x}, h: {:02x}, l: {:02x}, z: {}", opcode, self.pc, self.sp, self.a, self.b, self.c, self.d, self.e, self.h, self.l, self.cc.z);
+        // END
+
+        self.pc = self.pc.wrapping_add(1);
 
         match opcode {
             // ---- stack, I/O, and machine control group ----
@@ -308,7 +312,7 @@ impl State8080 {
             0xF3 => (), // DI (special)
             // PUSH PSW
             0xF5 => {
-                let flags = (self.cc.s << 7) | (self.cc.z << 6) | (self.cc.p << 2) | (self.cc.cy);
+                let flags = (self.cc.s << 7) | (self.cc.z << 6) | (self.cc.p << 2) | (self.cc.cy) | 0x02;
 
                 self.memory[idx_sp_sub2] = flags;
                 self.memory[idx_sp_sub1] = self.a;
@@ -392,8 +396,8 @@ impl State8080 {
             }
             // STA a16
             0x32 => {
-                // TODO: is this really a 3-byte instruction even though only 2 was used?
-                self.memory[idx_pc_add1] = self.a;
+                let address = ((self.memory[idx_pc_add2] as usize) << 8) | (self.memory[idx_pc_add1] as usize);
+                self.memory[address] = self.a;
                 self.pc = self.pc.wrapping_add(2);
             }
             // MVI M,d8
@@ -404,8 +408,8 @@ impl State8080 {
             }
             // LDA a16
             0x3A => {
-                // TODO: same with `0x32`, is this really a 3-byte instruction even though onlt 2 was used?
-                self.a = self.memory[idx_pc_add1];
+                let address = ((self.memory[idx_pc_add2] as usize) << 8) | (self.memory[idx_pc_add1] as usize);
+                self.a = self.memory[address];
                 self.pc = self.pc.wrapping_add(2);
             }
             // MVI A,d8
@@ -901,6 +905,8 @@ impl State8080 {
                 self.cc.s = get_s(self.a);
                 self.cc.p = get_p(self.a);
                 self.cc.cy = get_cy(false);
+
+                self.pc = self.pc.wrapping_add(1);
             }
             // XRI d8
             0xEE => {
@@ -910,6 +916,8 @@ impl State8080 {
                 self.cc.s = get_s(self.a);
                 self.cc.p = get_p(self.a);
                 self.cc.cy = get_cy(false);
+
+                self.pc = self.pc.wrapping_add(1);
             }
             // ORI d8
             0xF6 => {
@@ -919,6 +927,8 @@ impl State8080 {
                 self.cc.s = get_s(self.a);
                 self.cc.p = get_p(self.a);
                 self.cc.cy = get_cy(false);
+
+                self.pc = self.pc.wrapping_add(1);
             }
             // CPI d8
             0xFE => {
@@ -928,6 +938,8 @@ impl State8080 {
                 self.cc.s = get_s(result);
                 self.cc.p = get_p(result);
                 self.cc.cy = get_cy(has_overflowed);
+
+                self.pc = self.pc.wrapping_add(1);
             }
             // ---- branch group ----
             // RNZ (if Z is 0, meaning NOT Zero on the arg(see `get_z` function))
@@ -1025,8 +1037,9 @@ impl State8080 {
                 let address =
                     ((self.memory[idx_pc_add2] as u16) << 8) | (self.memory[idx_pc_add1] as u16);
 
-                self.memory[idx_sp_sub1] = (self.pc >> 8) as u8;
-                self.memory[idx_sp_sub2] = self.pc as u8;
+                let next_pc = self.pc + 2;
+                self.memory[idx_sp_sub1] = (next_pc >> 8) as u8;
+                self.memory[idx_sp_sub2] = next_pc as u8;
                 self.sp = self.sp.wrapping_sub(2);
                 self.pc = address;
             }
@@ -1293,12 +1306,5 @@ impl State8080 {
                 self.pc = 0b00111000;
             } // _ => panic!("Unknown opcode!"), // TODO: uncomment to determine the unimplemented opcodes
         }
-
-        self.pc = self.pc.wrapping_add(1);
-
-        // FOR DEBUGGING PURPOSES ONLY
-        // println!("a: {}, b: {}, c: {}, d: {}, e: {}, h: {}, l: {}, sp: {:04x}, pc: {:04x}", self.a, self.b, self.c, self.d, self.e, self.h, self.l, self.sp, self.pc);
-        // println!("z: {}, s: {}, p: {}, cy: {}", self.cc.z, self.cc.s, self.cc.p, self.cc.cy);
-        // END
     }
 }
