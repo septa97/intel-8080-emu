@@ -15,15 +15,15 @@ struct ConditionCodes {
 
 pub struct State8080 {
     halted: bool,
-    a: u8,
-    b: u8,
-    c: u8,
-    d: u8,
-    e: u8,
-    h: u8,
-    l: u8,
-    sp: u16, // stack pointer
-    pc: u16, // program counter
+    pub a: u8,
+    pub b: u8,
+    pub c: u8,
+    pub d: u8,
+    pub e: u8,
+    pub h: u8,
+    pub l: u8,
+    pub sp: u16, // stack pointer
+    pub pc: u16, // program counter
     memory: [u8; MEMORY_SIZE],
     cc: ConditionCodes,
     int_enable: u8, // TODO: figure out what this is
@@ -1024,8 +1024,9 @@ impl State8080 {
                     ((self.memory[idx_pc_add2] as u16) << 8) | (self.memory[idx_pc_add1] as u16);
 
                 if self.cc.z == 0 {
-                    self.memory[idx_sp_sub1] = (self.pc >> 8) as u8;
-                    self.memory[idx_sp_sub2] = self.pc as u8;
+                    let next_pc = self.pc + 2;
+                    self.memory[idx_sp_sub1] = (next_pc >> 8) as u8;
+                    self.memory[idx_sp_sub2] = next_pc as u8;
                     self.sp = self.sp.wrapping_sub(2);
                     self.pc = address;
                 } else {
@@ -1076,8 +1077,9 @@ impl State8080 {
                     ((self.memory[idx_pc_add2] as u16) << 8) | (self.memory[idx_pc_add1] as u16);
 
                 if self.cc.cy == 0 {
-                    self.memory[idx_sp_sub1] = (self.pc >> 8) as u8;
-                    self.memory[idx_sp_sub2] = self.pc as u8;
+                    let next_pc = self.pc + 2;
+                    self.memory[idx_sp_sub1] = (next_pc >> 8) as u8;
+                    self.memory[idx_sp_sub2] = next_pc as u8;
                     self.sp = self.sp.wrapping_sub(2);
                     self.pc = address;
                 } else {
@@ -1117,8 +1119,9 @@ impl State8080 {
                     ((self.memory[idx_pc_add2] as u16) << 8) | (self.memory[idx_pc_add1] as u16);
 
                 if self.cc.cy == 1 {
-                    self.memory[idx_sp_sub1] = (self.pc >> 8) as u8;
-                    self.memory[idx_sp_sub2] = self.pc as u8;
+                    let next_pc = self.pc + 2;
+                    self.memory[idx_sp_sub1] = (next_pc >> 8) as u8;
+                    self.memory[idx_sp_sub2] = next_pc as u8;
                     self.sp = self.sp.wrapping_sub(2);
                     self.pc = address;
                 } else {
@@ -1158,8 +1161,11 @@ impl State8080 {
                     ((self.memory[idx_pc_add2] as u16) << 8) | (self.memory[idx_pc_add1] as u16);
 
                 if self.cc.p == 0 {
-                    self.memory[idx_sp_sub1] = (self.pc >> 8) as u8;
-                    self.memory[idx_sp_sub2] = self.pc as u8;
+                    // TODO: maybe initialize `next_pc` at the top to avoid redundant code?
+                    // TODO: use a separate `push` and `pop` method for the stack
+                    let next_pc = self.pc + 2;
+                    self.memory[idx_sp_sub1] = (next_pc >> 8) as u8;
+                    self.memory[idx_sp_sub2] = next_pc as u8;
                     self.sp = self.sp.wrapping_sub(2);
                     self.pc = address;
                 } else {
@@ -1206,8 +1212,9 @@ impl State8080 {
                     ((self.memory[idx_pc_add2] as u16) << 8) | (self.memory[idx_pc_add1] as u16);
 
                 if self.cc.p == 1 {
-                    self.memory[idx_sp_sub1] = (self.pc >> 8) as u8;
-                    self.memory[idx_sp_sub2] = self.pc as u8;
+                    let next_pc = self.pc + 2;
+                    self.memory[idx_sp_sub1] = (next_pc >> 8) as u8;
+                    self.memory[idx_sp_sub2] = next_pc as u8;
                     self.sp = self.sp.wrapping_sub(2);
                     self.pc = address;
                 } else {
