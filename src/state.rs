@@ -3,7 +3,7 @@ use std::{fs::File, io::Read};
 
 pub const MEMORY_SIZE: usize = 65_536; // 2 ^ 16, 16-bit addresses
 
-// on `z:1`, the `:1` is a bit field!
+// on C++ `z:1`, the `:1` is a bit field!
 struct ConditionCodes {
     z: u8,
     s: u8,
@@ -54,6 +54,24 @@ fn get_p(num: u8) -> u8 {
 }
 
 fn get_cy(has_overflowed: bool) -> u8 {
+    if has_overflowed {
+        1
+    } else {
+        0
+    }
+}
+
+fn get_ac_add(num: u8, addend: u8) -> u8 {
+    if (num & 0x0F) + addend > 0x0F {
+        1
+    } else {
+        0
+    }
+}
+
+fn get_ac_sub(num: u8, subtrahend: u8) -> u8 {
+    let (_, has_overflowed) = (num & 0x0F).overflowing_sub(subtrahend & 0x0F);
+
     if has_overflowed {
         1
     } else {
@@ -159,6 +177,7 @@ impl State8080 {
         self.cc.s = get_s(ans);
         self.cc.p = get_p(ans & 0xFF);
         self.cc.cy = get_cy(has_overflowed);
+        self.cc.ac = get_ac_add(lhs, rhs);
 
         ans
     }
@@ -172,6 +191,7 @@ impl State8080 {
         self.cc.s = get_s(ans);
         self.cc.p = get_p(ans & 0xFF);
         self.cc.cy = get_cy(has_overflowed);
+        self.cc.ac = get_ac_add(lhs, rhs);
 
         ans + self.cc.cy // TODO: maybe this will overflow?
     }
@@ -185,6 +205,7 @@ impl State8080 {
         self.cc.s = get_s(ans);
         self.cc.p = get_p(ans & 0xFF);
         self.cc.cy = get_cy(has_overflowed);
+        self.cc.ac = get_ac_sub(lhs, rhs);
 
         ans
     }
@@ -198,6 +219,7 @@ impl State8080 {
         self.cc.s = get_s(ans);
         self.cc.p = get_p(ans & 0xFF);
         self.cc.cy = get_cy(has_overflowed);
+        self.cc.ac = get_ac_sub(lhs, rhs);
 
         ans - self.cc.cy // TODO: maybe this will overflow?
     }
@@ -504,6 +526,7 @@ impl State8080 {
                 self.cc.z = get_z(new_b);
                 self.cc.s = get_s(new_b);
                 self.cc.p = get_p(new_b);
+                self.cc.ac = get_ac_add(self.b, 1);
 
                 self.b = new_b;
             }
@@ -515,6 +538,7 @@ impl State8080 {
                 self.cc.z = get_z(new_b);
                 self.cc.s = get_s(new_b);
                 self.cc.p = get_p(new_b);
+                self.cc.ac = get_ac_sub(self.b, 1);
 
                 self.b = new_b;
             }
@@ -541,6 +565,7 @@ impl State8080 {
                 self.cc.z = get_z(new_c);
                 self.cc.s = get_s(new_c);
                 self.cc.p = get_p(new_c);
+                self.cc.ac = get_ac_add(self.c, 1);
 
                 self.c = new_c;
             }
@@ -552,6 +577,7 @@ impl State8080 {
                 self.cc.z = get_z(new_c);
                 self.cc.s = get_s(new_c);
                 self.cc.p = get_p(new_c);
+                self.cc.ac = get_ac_sub(self.c, 1);
 
                 self.c = new_c;
             }
@@ -569,6 +595,7 @@ impl State8080 {
                 self.cc.z = get_z(new_d);
                 self.cc.s = get_s(new_d);
                 self.cc.p = get_p(new_d);
+                self.cc.ac = get_ac_add(self.d, 1);
 
                 self.d = new_d;
             }
@@ -580,6 +607,7 @@ impl State8080 {
                 self.cc.z = get_z(new_d);
                 self.cc.s = get_s(new_d);
                 self.cc.p = get_p(new_d);
+                self.cc.ac = get_ac_sub(self.d, 1);
 
                 self.d = new_d;
             }
@@ -606,6 +634,7 @@ impl State8080 {
                 self.cc.z = get_z(new_e);
                 self.cc.s = get_s(new_e);
                 self.cc.p = get_p(new_e);
+                self.cc.ac = get_ac_add(self.e, 1);
 
                 self.e = new_e;
             }
@@ -617,6 +646,7 @@ impl State8080 {
                 self.cc.z = get_z(new_e);
                 self.cc.s = get_s(new_e);
                 self.cc.p = get_p(new_e);
+                self.cc.ac = get_ac_sub(self.e, 1);
 
                 self.e = new_e;
             }
@@ -634,6 +664,7 @@ impl State8080 {
                 self.cc.z = get_z(new_h);
                 self.cc.s = get_s(new_h);
                 self.cc.p = get_p(new_h);
+                self.cc.ac = get_ac_add(self.h, 1);
 
                 self.h = new_h;
             }
@@ -645,6 +676,7 @@ impl State8080 {
                 self.cc.z = get_z(new_h);
                 self.cc.s = get_s(new_h);
                 self.cc.p = get_p(new_h);
+                self.cc.ac = get_ac_sub(self.h, 1);
 
                 self.h = new_h;
             }
@@ -672,6 +704,7 @@ impl State8080 {
                 self.cc.z = get_z(new_l);
                 self.cc.s = get_s(new_l);
                 self.cc.p = get_p(new_l);
+                self.cc.ac = get_ac_add(self.l, 1);
 
                 self.l = new_l;
             }
@@ -683,6 +716,7 @@ impl State8080 {
                 self.cc.z = get_z(new_l);
                 self.cc.s = get_s(new_l);
                 self.cc.p = get_p(new_l);
+                self.cc.ac = get_ac_sub(self.l, 1);
 
                 self.l = new_l;
             }
@@ -700,6 +734,7 @@ impl State8080 {
                 self.cc.z = get_z(new_hl_mem);
                 self.cc.s = get_s(new_hl_mem);
                 self.cc.p = get_p(new_hl_mem);
+                self.cc.ac = get_ac_add(self.memory[hl], 1);
 
                 self.memory[hl] = new_hl_mem;
             }
@@ -711,6 +746,7 @@ impl State8080 {
                 self.cc.z = get_z(new_hl_mem);
                 self.cc.s = get_s(new_hl_mem);
                 self.cc.p = get_p(new_hl_mem);
+                self.cc.ac = get_ac_sub(self.memory[hl], 1);
 
                 self.memory[hl] = new_hl_mem;
             }
@@ -737,6 +773,7 @@ impl State8080 {
                 self.cc.z = get_z(new_a);
                 self.cc.s = get_s(new_a);
                 self.cc.p = get_p(new_a);
+                self.cc.ac = get_ac_add(self.a, 1);
 
                 self.a = new_a;
             }
@@ -748,6 +785,7 @@ impl State8080 {
                 self.cc.z = get_z(new_a);
                 self.cc.s = get_s(new_a);
                 self.cc.p = get_p(new_a);
+                self.cc.ac = get_ac_sub(self.a, 1);
 
                 self.a = new_a;
             }
