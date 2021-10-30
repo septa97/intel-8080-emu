@@ -79,6 +79,11 @@ fn get_ac_sub(num: u8, subtrahend: u8) -> u8 {
     }
 }
 
+// TODO: verify if this is the correct implementation
+fn get_ac_and(a: u8, b: u8) -> u8 {
+    (a & 0x08) | (b & 0x08)
+}
+
 impl Default for State8080 {
     fn default() -> Self {
         State8080 {
@@ -864,14 +869,38 @@ impl State8080 {
             0x3F => self.cc.cy = !self.cc.cy, // CMC
             0xA0 | 0xA1 | 0xA2 | 0xA3 | 0xA4 | 0xA5 | 0xA6 | 0xA7 => {
                 match opcode {
-                    0xA0 => self.a &= self.b,          // ANA B
-                    0xA1 => self.a &= self.c,          // ANA C
-                    0xA2 => self.a &= self.d,          // ANA D
-                    0xA3 => self.a &= self.e,          // ANA E
-                    0xA4 => self.a &= self.h,          // ANA H
-                    0xA5 => self.a &= self.l,          // ANA L
-                    0xA6 => self.a &= self.memory[hl], // ANA M
-                    0xA7 => self.a &= self.a,          // ANA A (does something happen with this???)
+                    0xA0 => {
+                        self.cc.ac = get_ac_and(self.a, self.b);
+                        self.a &= self.b;
+                    },          // ANA B
+                    0xA1 => {
+                        self.cc.ac = get_ac_and(self.a, self.c);
+                        self.a &= self.c;
+                    },          // ANA C
+                    0xA2 => {
+                        self.cc.ac = get_ac_and(self.a, self.d);
+                        self.a &= self.d;
+                    },          // ANA D
+                    0xA3 => {
+                        self.cc.ac = get_ac_and(self.a, self.e);
+                        self.a &= self.e;
+                    },          // ANA E
+                    0xA4 => {
+                        self.cc.ac = get_ac_and(self.a, self.h);
+                        self.a &= self.h;
+                    },          // ANA H
+                    0xA5 => {
+                        self.cc.ac = get_ac_and(self.a, self.l);
+                        self.a &= self.l;
+                    },          // ANA L
+                    0xA6 => {
+                        self.cc.ac = get_ac_and(self.a, self.memory[hl]);
+                        self.a &= self.memory[hl];
+                    }, // ANA M
+                    0xA7 => {
+                        self.cc.ac = get_ac_and(self.a, self.a);
+                        self.a &= self.a;
+                    },          // ANA A (does something happen with this???)
                     _ => panic!("This shouldn't be reached."),
                 }
 
@@ -897,6 +926,8 @@ impl State8080 {
                 self.cc.s = get_s(self.a);
                 self.cc.p = get_p(self.a);
                 self.cc.cy = get_cy(false);
+                // TODO: verify if this is the correct implementation
+                self.cc.ac = 0u8;
             }
             0xB0 | 0xB1 | 0xB2 | 0xB3 | 0xB4 | 0xB5 | 0xB6 | 0xB7 => {
                 match opcode {
@@ -915,17 +946,43 @@ impl State8080 {
                 self.cc.s = get_s(self.a);
                 self.cc.p = get_p(self.a);
                 self.cc.cy = get_cy(false);
+                // TODO: verify if this is the correct implementation
+                self.cc.ac = 0u8;
             }
             0xB8 | 0xB9 | 0xBA | 0xBB | 0xBC | 0xBD | 0xBE | 0xBF => {
                 let (result, has_overflowed) = match opcode {
-                    0xB8 => self.a.overflowing_sub(self.b),          // CMP B
-                    0xB9 => self.a.overflowing_sub(self.c),          // CMP C
-                    0xBA => self.a.overflowing_sub(self.d),          // CMP D
-                    0xBB => self.a.overflowing_sub(self.e),          // CMP E
-                    0xBC => self.a.overflowing_sub(self.h),          // CMP H
-                    0xBD => self.a.overflowing_sub(self.l),          // CMP L
-                    0xBE => self.a.overflowing_sub(self.memory[hl]), // CMP M
-                    0xBF => self.a.overflowing_sub(self.a), // CMP A (does something happen with this???)
+                    0xB8 => {
+                        self.cc.ac = get_ac_sub(self.a, self.b);
+                        self.a.overflowing_sub(self.b)
+                    },          // CMP B
+                    0xB9 => {
+                        self.cc.ac = get_ac_sub(self.a, self.c);
+                        self.a.overflowing_sub(self.c)
+                    },          // CMP C
+                    0xBA => {
+                        self.cc.ac = get_ac_sub(self.a, self.d);
+                        self.a.overflowing_sub(self.d)
+                    },          // CMP D
+                    0xBB => {
+                        self.cc.ac = get_ac_sub(self.a, self.e);
+                        self.a.overflowing_sub(self.e)
+                    },          // CMP E
+                    0xBC => {
+                        self.cc.ac = get_ac_sub(self.a, self.h);
+                        self.a.overflowing_sub(self.h)
+                    },          // CMP H
+                    0xBD => {
+                        self.cc.ac = get_ac_sub(self.a, self.l);
+                        self.a.overflowing_sub(self.l)
+                    },          // CMP L
+                    0xBE => {
+                        self.cc.ac = get_ac_sub(self.a, self.memory[hl]);
+                        self.a.overflowing_sub(self.memory[hl])
+                    }, // CMP M
+                    0xBF => {
+                        self.cc.ac = get_ac_sub(self.a, self.a);
+                        self.a.overflowing_sub(self.a)
+                    }, // CMP A (does something happen with this???)
                     _ => panic!("This shouldn't be reached."),
                 };
 
@@ -937,6 +994,7 @@ impl State8080 {
             // TODO: maybe compress ANI, XRI, ORI, and CPI?
             // ANI d8
             0xE6 => {
+                self.cc.ac = get_ac_and(self.a, self.memory[idx_pc_add1]);
                 self.a &= self.memory[idx_pc_add1];
 
                 self.cc.z = get_z(self.a);
@@ -954,6 +1012,8 @@ impl State8080 {
                 self.cc.s = get_s(self.a);
                 self.cc.p = get_p(self.a);
                 self.cc.cy = get_cy(false);
+                // TODO: verify if this is the correct implementation
+                self.cc.ac = 0u8;
 
                 self.pc = self.pc.wrapping_add(1);
             }
@@ -1013,7 +1073,8 @@ impl State8080 {
                 let address =
                     ((self.memory[idx_pc_add2] as u16) << 8) | (self.memory[idx_pc_add1] as u16);
 
-                if self.cc.z == 1 {
+                // TODO: verify this
+                if self.cc.z != 1 {
                     self.memory[idx_sp_sub1] = (self.pc >> 8) as u8;
                     self.memory[idx_sp_sub2] = self.pc as u8;
                     self.sp = self.sp.wrapping_sub(2);
@@ -1061,7 +1122,8 @@ impl State8080 {
                 let address =
                     ((self.memory[idx_pc_add2] as u16) << 8) | (self.memory[idx_pc_add1] as u16);
 
-                if self.cc.z == 0 {
+                // TODO: verify this
+                if self.cc.z != 0 {
                     let next_pc = self.pc + 2;
                     self.memory[idx_sp_sub1] = (next_pc >> 8) as u8;
                     self.memory[idx_sp_sub2] = next_pc as u8;
