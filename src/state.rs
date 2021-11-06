@@ -45,8 +45,18 @@ fn get_s(num: u8) -> u8 {
     }
 }
 
-fn get_p(num: u8) -> u8 {
-    if num % 2 == 0 {
+fn get_p(mut num: u8) -> u8 {
+    let mut total: u8 = 0;
+
+    for _ in 0..8 {
+        if num & 0x01 == 1 {
+            total += 1;
+        }
+
+        num >>= 1;
+    }
+
+    if total % 2 == 0 {
         1
     } else {
         0
@@ -62,7 +72,7 @@ fn get_cy(has_overflowed: bool) -> u8 {
 }
 
 fn get_ac_add(num: u8, addend: u8) -> u8 {
-    if (num & 0x0F) + addend > 0x0F {
+    if (num & 0x0F) + (addend & 0x0F) > 0x0F {
         1
     } else {
         0
@@ -190,6 +200,7 @@ impl State8080 {
     // for ADC (and ACI) instructions
     fn adc(&mut self, lhs: u8, rhs: u8) -> u8 {
         let (ans, has_overflowed) = lhs.overflowing_add(rhs);
+        let prev_cy = self.cc.cy;
 
         // flags
         self.cc.z = get_z(ans);
@@ -198,7 +209,7 @@ impl State8080 {
         self.cc.cy = get_cy(has_overflowed);
         self.cc.ac = get_ac_add(lhs, rhs);
 
-        ans + self.cc.cy // TODO: maybe this will overflow?
+        ans.wrapping_add(prev_cy)
     }
 
     // for SUB and SUI instructions
@@ -218,6 +229,7 @@ impl State8080 {
     // for SBB (and SBI) instructions
     fn sbb(&mut self, lhs: u8, rhs: u8) -> u8 {
         let (ans, has_overflowed) = lhs.overflowing_sub(rhs);
+        let prev_cy = self.cc.cy;
 
         // flags
         self.cc.z = get_z(ans);
@@ -226,7 +238,7 @@ impl State8080 {
         self.cc.cy = get_cy(has_overflowed);
         self.cc.ac = get_ac_sub(lhs, rhs);
 
-        ans - self.cc.cy // TODO: maybe this will overflow?
+        ans.wrapping_sub(prev_cy)
     }
 
     // update `b` and `c`
@@ -264,7 +276,7 @@ impl State8080 {
         let idx_sp_sub2 = self.sp.wrapping_sub(2) as usize;
 
         // FOR DEBUGGING PURPOSES ONLY
-        println!("opcode: {:02x}, pc: {:04x}, sp: {:04x}, a: {:02x}, b: {:02x}, c: {:02x}, d: {:02x}, e: {:02x}, h: {:02x}, l: {:02x}, z: {}", opcode, self.pc, self.sp, self.a, self.b, self.c, self.d, self.e, self.h, self.l, self.cc.z);
+        println!("opcode: {:02x}, pc: {:04x}, sp: {:04x}, a: {:02x}, b: {:02x}, c: {:02x}, d: {:02x}, e: {:02x}, h: {:02x}, l: {:02x}, z: {}, s:{}, p: {}, c: {}, a: {}", opcode, self.pc, self.sp, self.a, self.b, self.c, self.d, self.e, self.h, self.l, self.cc.z, self.cc.s, self.cc.p, self.cc.cy, self.cc.ac);
         // END
 
         self.pc = self.pc.wrapping_add(1);
@@ -339,7 +351,8 @@ impl State8080 {
             0xF3 => (), // DI (special)
             // PUSH PSW
             0xF5 => {
-                let flags = (self.cc.s << 7) | (self.cc.z << 6) | (self.cc.p << 2) | (self.cc.cy) | 0x02;
+                let flags =
+                    (self.cc.s << 7) | (self.cc.z << 6) | (self.cc.p << 2) | (self.cc.cy) | 0x02;
 
                 self.memory[idx_sp_sub2] = flags;
                 self.memory[idx_sp_sub1] = self.a;
@@ -423,7 +436,8 @@ impl State8080 {
             }
             // STA a16
             0x32 => {
-                let address = ((self.memory[idx_pc_add2] as usize) << 8) | (self.memory[idx_pc_add1] as usize);
+                let address = ((self.memory[idx_pc_add2] as usize) << 8)
+                    | (self.memory[idx_pc_add1] as usize);
                 self.memory[address] = self.a;
                 self.pc = self.pc.wrapping_add(2);
             }
@@ -435,7 +449,8 @@ impl State8080 {
             }
             // LDA a16
             0x3A => {
-                let address = ((self.memory[idx_pc_add2] as usize) << 8) | (self.memory[idx_pc_add1] as usize);
+                let address = ((self.memory[idx_pc_add2] as usize) << 8)
+                    | (self.memory[idx_pc_add1] as usize);
                 self.a = self.memory[address];
                 self.pc = self.pc.wrapping_add(2);
             }
@@ -810,26 +825,38 @@ impl State8080 {
             0x8D => self.a = self.adc(self.a, self.l), // ADC L
             0x8E => self.a = self.adc(self.a, self.memory[hl]), // ADC M (A = A + (HL) + CY)
             0x8F => self.a = self.adc(self.a, self.a), // ADC A (A = A + A + CY)
-            0xC6 => self.a = self.add(self.a, self.memory[idx_pc_add1]), // ADI D8 (rhs is an immediate value)
-            0xCE => self.a = self.adc(self.a, self.memory[idx_pc_add1]), // ACI D8 (rhs is an immediate value PLUS the carry flag value)
-            0x90 => self.a = self.sub(self.a, self.b),                   // SUB B
-            0x91 => self.a = self.sub(self.a, self.c),                   // SUB C
-            0x92 => self.a = self.sub(self.a, self.d),                   // SUB D
-            0x93 => self.a = self.sub(self.a, self.e),                   // SUB E
-            0x94 => self.a = self.sub(self.a, self.h),                   // SUB H
-            0x95 => self.a = self.sub(self.a, self.l),                   // SUB L
-            0x96 => self.a = self.sub(self.a, self.memory[hl]),          // SUB M (A = A - (HL))
-            0x97 => self.a = self.sub(self.a, self.a),                   // SUB A (A = A - A)
-            0x98 => self.a = self.sbb(self.a, self.b),                   // SBB B
-            0x99 => self.a = self.sbb(self.a, self.c),                   // SBB C
-            0x9A => self.a = self.sbb(self.a, self.d),                   // SBB D
-            0x9B => self.a = self.sbb(self.a, self.e),                   // SBB E
-            0x9C => self.a = self.sbb(self.a, self.h),                   // SBB H
-            0x9D => self.a = self.sbb(self.a, self.l),                   // SBB L
+            0xC6 => {
+                self.a = self.add(self.a, self.memory[idx_pc_add1]);
+                self.pc = self.pc.wrapping_add(1);
+            } // ADI D8 (rhs is an immediate value)
+            0xCE => {
+                self.a = self.adc(self.a, self.memory[idx_pc_add1]);
+                self.pc = self.pc.wrapping_add(1);
+            } // ACI D8 (rhs is an immediate value PLUS the carry flag value)
+            0x90 => self.a = self.sub(self.a, self.b), // SUB B
+            0x91 => self.a = self.sub(self.a, self.c), // SUB C
+            0x92 => self.a = self.sub(self.a, self.d), // SUB D
+            0x93 => self.a = self.sub(self.a, self.e), // SUB E
+            0x94 => self.a = self.sub(self.a, self.h), // SUB H
+            0x95 => self.a = self.sub(self.a, self.l), // SUB L
+            0x96 => self.a = self.sub(self.a, self.memory[hl]), // SUB M (A = A - (HL))
+            0x97 => self.a = self.sub(self.a, self.a), // SUB A (A = A - A)
+            0x98 => self.a = self.sbb(self.a, self.b), // SBB B
+            0x99 => self.a = self.sbb(self.a, self.c), // SBB C
+            0x9A => self.a = self.sbb(self.a, self.d), // SBB D
+            0x9B => self.a = self.sbb(self.a, self.e), // SBB E
+            0x9C => self.a = self.sbb(self.a, self.h), // SBB H
+            0x9D => self.a = self.sbb(self.a, self.l), // SBB L
             0x9E => self.a = self.sbb(self.a, self.memory[hl]), // SBB M (A = A - (HL) - CY)
-            0x9F => self.a = self.sbb(self.a, self.a),          // SBB A (A = A - A - CY)
-            0xD6 => self.a = self.sub(self.a, self.memory[idx_pc_add1]), // SUI D8 (rhs is an immediate value)
-            0xDE => self.a = self.sbb(self.a, self.memory[idx_pc_add1]), // SBI D8 (rhs is an immediate value MINUS the carry flag value)
+            0x9F => self.a = self.sbb(self.a, self.a), // SBB A (A = A - A - CY)
+            0xD6 => {
+                self.a = self.sub(self.a, self.memory[idx_pc_add1]);
+                self.pc = self.pc.wrapping_add(1);
+            } // SUI D8 (rhs is an immediate value)
+            0xDE => {
+                self.a = self.sbb(self.a, self.memory[idx_pc_add1]);
+                self.pc = self.pc.wrapping_add(1);
+            } // SBI D8 (rhs is an immediate value MINUS the carry flag value)
             // ---- logical group ----
             // RLC
             0x07 => {
@@ -872,35 +899,35 @@ impl State8080 {
                     0xA0 => {
                         self.cc.ac = get_ac_and(self.a, self.b);
                         self.a &= self.b;
-                    },          // ANA B
+                    } // ANA B
                     0xA1 => {
                         self.cc.ac = get_ac_and(self.a, self.c);
                         self.a &= self.c;
-                    },          // ANA C
+                    } // ANA C
                     0xA2 => {
                         self.cc.ac = get_ac_and(self.a, self.d);
                         self.a &= self.d;
-                    },          // ANA D
+                    } // ANA D
                     0xA3 => {
                         self.cc.ac = get_ac_and(self.a, self.e);
                         self.a &= self.e;
-                    },          // ANA E
+                    } // ANA E
                     0xA4 => {
                         self.cc.ac = get_ac_and(self.a, self.h);
                         self.a &= self.h;
-                    },          // ANA H
+                    } // ANA H
                     0xA5 => {
                         self.cc.ac = get_ac_and(self.a, self.l);
                         self.a &= self.l;
-                    },          // ANA L
+                    } // ANA L
                     0xA6 => {
                         self.cc.ac = get_ac_and(self.a, self.memory[hl]);
                         self.a &= self.memory[hl];
-                    }, // ANA M
+                    } // ANA M
                     0xA7 => {
                         self.cc.ac = get_ac_and(self.a, self.a);
                         self.a &= self.a;
-                    },          // ANA A (does something happen with this???)
+                    } // ANA A (does something happen with this???)
                     _ => panic!("This shouldn't be reached."),
                 }
 
@@ -954,35 +981,35 @@ impl State8080 {
                     0xB8 => {
                         self.cc.ac = get_ac_sub(self.a, self.b);
                         self.a.overflowing_sub(self.b)
-                    },          // CMP B
+                    } // CMP B
                     0xB9 => {
                         self.cc.ac = get_ac_sub(self.a, self.c);
                         self.a.overflowing_sub(self.c)
-                    },          // CMP C
+                    } // CMP C
                     0xBA => {
                         self.cc.ac = get_ac_sub(self.a, self.d);
                         self.a.overflowing_sub(self.d)
-                    },          // CMP D
+                    } // CMP D
                     0xBB => {
                         self.cc.ac = get_ac_sub(self.a, self.e);
                         self.a.overflowing_sub(self.e)
-                    },          // CMP E
+                    } // CMP E
                     0xBC => {
                         self.cc.ac = get_ac_sub(self.a, self.h);
                         self.a.overflowing_sub(self.h)
-                    },          // CMP H
+                    } // CMP H
                     0xBD => {
                         self.cc.ac = get_ac_sub(self.a, self.l);
                         self.a.overflowing_sub(self.l)
-                    },          // CMP L
+                    } // CMP L
                     0xBE => {
                         self.cc.ac = get_ac_sub(self.a, self.memory[hl]);
                         self.a.overflowing_sub(self.memory[hl])
-                    }, // CMP M
+                    } // CMP M
                     0xBF => {
                         self.cc.ac = get_ac_sub(self.a, self.a);
                         self.a.overflowing_sub(self.a)
-                    }, // CMP A (does something happen with this???)
+                    } // CMP A (does something happen with this???)
                     _ => panic!("This shouldn't be reached."),
                 };
 
@@ -1036,6 +1063,7 @@ impl State8080 {
                 self.cc.s = get_s(result);
                 self.cc.p = get_p(result);
                 self.cc.cy = get_cy(has_overflowed);
+                self.cc.ac = get_ac_sub(self.a, self.memory[idx_pc_add1]);
 
                 self.pc = self.pc.wrapping_add(1);
             }
@@ -1075,8 +1103,9 @@ impl State8080 {
 
                 // TODO: verify this
                 if self.cc.z != 1 {
-                    self.memory[idx_sp_sub1] = (self.pc >> 8) as u8;
-                    self.memory[idx_sp_sub2] = self.pc as u8;
+                    let next_pc = self.pc + 2;
+                    self.memory[idx_sp_sub1] = (next_pc >> 8) as u8;
+                    self.memory[idx_sp_sub2] = next_pc as u8;
                     self.sp = self.sp.wrapping_sub(2);
                     self.pc = address;
                 } else {
@@ -1290,9 +1319,6 @@ impl State8080 {
             }
             // PCHL
             0xE9 => {
-                self.memory[idx_sp_sub1] = (self.pc >> 8) as u8;
-                self.memory[idx_sp_sub2] = self.pc as u8;
-                self.sp = self.sp.wrapping_sub(2);
                 self.pc = hl as u16;
             }
             // JPE adr (if P is even)
@@ -1355,8 +1381,9 @@ impl State8080 {
                     ((self.memory[idx_pc_add2] as u16) << 8) | (self.memory[idx_pc_add1] as u16);
 
                 if self.cc.s == 0 {
-                    self.memory[idx_sp_sub1] = (self.pc >> 8) as u8;
-                    self.memory[idx_sp_sub2] = self.pc as u8;
+                    let next_pc = self.pc + 2;
+                    self.memory[idx_sp_sub1] = (next_pc >> 8) as u8;
+                    self.memory[idx_sp_sub2] = next_pc as u8;
                     self.sp = self.sp.wrapping_sub(2);
                     self.pc = address;
                 } else {
@@ -1397,8 +1424,9 @@ impl State8080 {
                     ((self.memory[idx_pc_add2] as u16) << 8) | (self.memory[idx_pc_add1] as u16);
 
                 if self.cc.s == 1 {
-                    self.memory[idx_sp_sub1] = (self.pc >> 8) as u8;
-                    self.memory[idx_sp_sub2] = self.pc as u8;
+                    let next_pc = self.pc + 2;
+                    self.memory[idx_sp_sub1] = (next_pc >> 8) as u8;
+                    self.memory[idx_sp_sub2] = next_pc as u8;
                     self.sp = self.sp.wrapping_sub(2);
                     self.pc = address;
                 } else {
