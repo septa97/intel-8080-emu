@@ -71,18 +71,24 @@ fn get_cy(has_overflowed: bool) -> u8 {
     }
 }
 
-fn get_ac_add(num: u8, addend: u8) -> u8 {
-    if (num & 0x0F) + (addend & 0x0F) > 0x0F {
+fn get_ac_add(num: u8, addend: u8, cy_opt: Option<u8>) -> u8 {
+    // shadowing
+    let res = (num & 0x0F) + (addend & 0x0F);
+    let res = cy_opt.map_or(res, |cy| res + cy);
+
+    if res > 0x0F {
         1
     } else {
         0
     }
 }
 
-fn get_ac_sub(num: u8, subtrahend: u8) -> u8 {
-    let (_, has_overflowed) = (num & 0x0F).overflowing_sub(subtrahend & 0x0F);
+fn get_ac_sub(num: u8, subtrahend: u8, cy_opt: Option<u8>) -> u8 {
+    // shadowing
+    let res = (num as i8 & 0x0F).overflowing_sub(subtrahend as i8 & 0x0F);
+    let (res, _) = cy_opt.map_or(res, |cy| res.0.overflowing_sub(cy as i8));
 
-    if has_overflowed {
+    if res >= 0x00 {
         1
     } else {
         0
@@ -91,7 +97,9 @@ fn get_ac_sub(num: u8, subtrahend: u8) -> u8 {
 
 // TODO: verify if this is the correct implementation
 fn get_ac_and(a: u8, b: u8) -> u8 {
-    (a & 0x08) | (b & 0x08)
+    // not sure what logical property can simplify this to ((a | b) & 0x08) that's why I go for the complex but readable solution based on this reference: (see next line)
+    // https://retrocomputing.stackexchange.com/questions/14977/auxiliary-carry-and-the-intel-8080s-logical-instructions
+    ((a & 0x08) | (b & 0x08)) >> 3
 }
 
 impl Default for State8080 {
@@ -192,24 +200,23 @@ impl State8080 {
         self.cc.s = get_s(ans);
         self.cc.p = get_p(ans & 0xFF);
         self.cc.cy = get_cy(has_overflowed);
-        self.cc.ac = get_ac_add(lhs, rhs);
+        self.cc.ac = get_ac_add(lhs, rhs, None);
 
         ans
     }
 
     // for ADC (and ACI) instructions
     fn adc(&mut self, lhs: u8, rhs: u8) -> u8 {
-        let (ans, has_overflowed) = lhs.overflowing_add(rhs);
-        let prev_cy = self.cc.cy;
+        let (ans, has_overflowed) = lhs.wrapping_add(rhs).overflowing_add(self.cc.cy);
 
         // flags
         self.cc.z = get_z(ans);
         self.cc.s = get_s(ans);
         self.cc.p = get_p(ans & 0xFF);
+        self.cc.ac = get_ac_add(lhs, rhs, Some(self.cc.cy));
         self.cc.cy = get_cy(has_overflowed);
-        self.cc.ac = get_ac_add(lhs, rhs);
 
-        ans.wrapping_add(prev_cy)
+        ans
     }
 
     // for SUB and SUI instructions
@@ -220,25 +227,24 @@ impl State8080 {
         self.cc.z = get_z(ans);
         self.cc.s = get_s(ans);
         self.cc.p = get_p(ans & 0xFF);
+        self.cc.ac = get_ac_sub(lhs, rhs, None);
         self.cc.cy = get_cy(has_overflowed);
-        self.cc.ac = get_ac_sub(lhs, rhs);
 
         ans
     }
 
     // for SBB (and SBI) instructions
     fn sbb(&mut self, lhs: u8, rhs: u8) -> u8 {
-        let (ans, has_overflowed) = lhs.overflowing_sub(rhs);
-        let prev_cy = self.cc.cy;
+        let ans = lhs.wrapping_sub(rhs).wrapping_sub(self.cc.cy);
 
         // flags
         self.cc.z = get_z(ans);
         self.cc.s = get_s(ans);
         self.cc.p = get_p(ans & 0xFF);
-        self.cc.cy = get_cy(has_overflowed);
-        self.cc.ac = get_ac_sub(lhs, rhs);
+        self.cc.ac = get_ac_sub(lhs, rhs, Some(self.cc.cy));
+        self.cc.cy = get_cy(lhs < rhs + self.cc.cy);
 
-        ans.wrapping_sub(prev_cy)
+        ans
     }
 
     // update `b` and `c`
@@ -407,8 +413,10 @@ impl State8080 {
             }
             // SHLD a16
             0x22 => {
-                self.memory[idx_pc_add1] = self.l;
-                self.memory[idx_pc_add2] = self.h;
+                let l_idx = ((self.memory[idx_pc_add2] as usize) << 8) | (self.memory[idx_pc_add1] as usize);
+                let h_idx = l_idx + 1; // for readability
+                self.memory[l_idx] = self.l;
+                self.memory[h_idx] = self.h;
                 self.pc = self.pc.wrapping_add(2);
             }
             // MVI H,d8
@@ -418,8 +426,10 @@ impl State8080 {
             }
             // LHLD D
             0x2A => {
-                self.l = self.memory[idx_pc_add1];
-                self.h = self.memory[idx_pc_add2];
+                let l_idx = ((self.memory[idx_pc_add2] as usize) << 8) | (self.memory[idx_pc_add1] as usize);
+                let h_idx = l_idx+1; // for readability
+                self.l = self.memory[l_idx];
+                self.h = self.memory[h_idx];
                 self.pc = self.pc.wrapping_add(2);
             }
             // MVI L,d8
@@ -546,7 +556,7 @@ impl State8080 {
                 self.cc.z = get_z(new_b);
                 self.cc.s = get_s(new_b);
                 self.cc.p = get_p(new_b);
-                self.cc.ac = get_ac_add(self.b, 1);
+                self.cc.ac = get_ac_add(self.b, 1, None);
 
                 self.b = new_b;
             }
@@ -558,7 +568,7 @@ impl State8080 {
                 self.cc.z = get_z(new_b);
                 self.cc.s = get_s(new_b);
                 self.cc.p = get_p(new_b);
-                self.cc.ac = get_ac_sub(self.b, 1);
+                self.cc.ac = get_ac_sub(self.b, 1, None);
 
                 self.b = new_b;
             }
@@ -585,7 +595,7 @@ impl State8080 {
                 self.cc.z = get_z(new_c);
                 self.cc.s = get_s(new_c);
                 self.cc.p = get_p(new_c);
-                self.cc.ac = get_ac_add(self.c, 1);
+                self.cc.ac = get_ac_add(self.c, 1, None);
 
                 self.c = new_c;
             }
@@ -597,7 +607,7 @@ impl State8080 {
                 self.cc.z = get_z(new_c);
                 self.cc.s = get_s(new_c);
                 self.cc.p = get_p(new_c);
-                self.cc.ac = get_ac_sub(self.c, 1);
+                self.cc.ac = get_ac_sub(self.c, 1, None);
 
                 self.c = new_c;
             }
@@ -615,7 +625,7 @@ impl State8080 {
                 self.cc.z = get_z(new_d);
                 self.cc.s = get_s(new_d);
                 self.cc.p = get_p(new_d);
-                self.cc.ac = get_ac_add(self.d, 1);
+                self.cc.ac = get_ac_add(self.d, 1, None);
 
                 self.d = new_d;
             }
@@ -627,7 +637,7 @@ impl State8080 {
                 self.cc.z = get_z(new_d);
                 self.cc.s = get_s(new_d);
                 self.cc.p = get_p(new_d);
-                self.cc.ac = get_ac_sub(self.d, 1);
+                self.cc.ac = get_ac_sub(self.d, 1, None);
 
                 self.d = new_d;
             }
@@ -654,7 +664,7 @@ impl State8080 {
                 self.cc.z = get_z(new_e);
                 self.cc.s = get_s(new_e);
                 self.cc.p = get_p(new_e);
-                self.cc.ac = get_ac_add(self.e, 1);
+                self.cc.ac = get_ac_add(self.e, 1, None);
 
                 self.e = new_e;
             }
@@ -666,7 +676,7 @@ impl State8080 {
                 self.cc.z = get_z(new_e);
                 self.cc.s = get_s(new_e);
                 self.cc.p = get_p(new_e);
-                self.cc.ac = get_ac_sub(self.e, 1);
+                self.cc.ac = get_ac_sub(self.e, 1, None);
 
                 self.e = new_e;
             }
@@ -684,7 +694,7 @@ impl State8080 {
                 self.cc.z = get_z(new_h);
                 self.cc.s = get_s(new_h);
                 self.cc.p = get_p(new_h);
-                self.cc.ac = get_ac_add(self.h, 1);
+                self.cc.ac = get_ac_add(self.h, 1, None);
 
                 self.h = new_h;
             }
@@ -696,7 +706,7 @@ impl State8080 {
                 self.cc.z = get_z(new_h);
                 self.cc.s = get_s(new_h);
                 self.cc.p = get_p(new_h);
-                self.cc.ac = get_ac_sub(self.h, 1);
+                self.cc.ac = get_ac_sub(self.h, 1, None);
 
                 self.h = new_h;
             }
@@ -724,7 +734,7 @@ impl State8080 {
                 self.cc.z = get_z(new_l);
                 self.cc.s = get_s(new_l);
                 self.cc.p = get_p(new_l);
-                self.cc.ac = get_ac_add(self.l, 1);
+                self.cc.ac = get_ac_add(self.l, 1, None);
 
                 self.l = new_l;
             }
@@ -736,7 +746,7 @@ impl State8080 {
                 self.cc.z = get_z(new_l);
                 self.cc.s = get_s(new_l);
                 self.cc.p = get_p(new_l);
-                self.cc.ac = get_ac_sub(self.l, 1);
+                self.cc.ac = get_ac_sub(self.l, 1, None);
 
                 self.l = new_l;
             }
@@ -754,7 +764,7 @@ impl State8080 {
                 self.cc.z = get_z(new_hl_mem);
                 self.cc.s = get_s(new_hl_mem);
                 self.cc.p = get_p(new_hl_mem);
-                self.cc.ac = get_ac_add(self.memory[hl], 1);
+                self.cc.ac = get_ac_add(self.memory[hl], 1, None);
 
                 self.memory[hl] = new_hl_mem;
             }
@@ -766,7 +776,7 @@ impl State8080 {
                 self.cc.z = get_z(new_hl_mem);
                 self.cc.s = get_s(new_hl_mem);
                 self.cc.p = get_p(new_hl_mem);
-                self.cc.ac = get_ac_sub(self.memory[hl], 1);
+                self.cc.ac = get_ac_sub(self.memory[hl], 1, None);
 
                 self.memory[hl] = new_hl_mem;
             }
@@ -793,7 +803,7 @@ impl State8080 {
                 self.cc.z = get_z(new_a);
                 self.cc.s = get_s(new_a);
                 self.cc.p = get_p(new_a);
-                self.cc.ac = get_ac_add(self.a, 1);
+                self.cc.ac = get_ac_add(self.a, 1, None);
 
                 self.a = new_a;
             }
@@ -805,7 +815,7 @@ impl State8080 {
                 self.cc.z = get_z(new_a);
                 self.cc.s = get_s(new_a);
                 self.cc.p = get_p(new_a);
-                self.cc.ac = get_ac_sub(self.a, 1);
+                self.cc.ac = get_ac_sub(self.a, 1, None);
 
                 self.a = new_a;
             }
@@ -979,35 +989,35 @@ impl State8080 {
             0xB8 | 0xB9 | 0xBA | 0xBB | 0xBC | 0xBD | 0xBE | 0xBF => {
                 let (result, has_overflowed) = match opcode {
                     0xB8 => {
-                        self.cc.ac = get_ac_sub(self.a, self.b);
+                        self.cc.ac = get_ac_sub(self.a, self.b, None);
                         self.a.overflowing_sub(self.b)
                     } // CMP B
                     0xB9 => {
-                        self.cc.ac = get_ac_sub(self.a, self.c);
+                        self.cc.ac = get_ac_sub(self.a, self.c, None);
                         self.a.overflowing_sub(self.c)
                     } // CMP C
                     0xBA => {
-                        self.cc.ac = get_ac_sub(self.a, self.d);
+                        self.cc.ac = get_ac_sub(self.a, self.d, None);
                         self.a.overflowing_sub(self.d)
                     } // CMP D
                     0xBB => {
-                        self.cc.ac = get_ac_sub(self.a, self.e);
+                        self.cc.ac = get_ac_sub(self.a, self.e, None);
                         self.a.overflowing_sub(self.e)
                     } // CMP E
                     0xBC => {
-                        self.cc.ac = get_ac_sub(self.a, self.h);
+                        self.cc.ac = get_ac_sub(self.a, self.h, None);
                         self.a.overflowing_sub(self.h)
                     } // CMP H
                     0xBD => {
-                        self.cc.ac = get_ac_sub(self.a, self.l);
+                        self.cc.ac = get_ac_sub(self.a, self.l, None);
                         self.a.overflowing_sub(self.l)
                     } // CMP L
                     0xBE => {
-                        self.cc.ac = get_ac_sub(self.a, self.memory[hl]);
+                        self.cc.ac = get_ac_sub(self.a, self.memory[hl], None);
                         self.a.overflowing_sub(self.memory[hl])
                     } // CMP M
                     0xBF => {
-                        self.cc.ac = get_ac_sub(self.a, self.a);
+                        self.cc.ac = get_ac_sub(self.a, self.a, None);
                         self.a.overflowing_sub(self.a)
                     } // CMP A (does something happen with this???)
                     _ => panic!("This shouldn't be reached."),
@@ -1021,13 +1031,15 @@ impl State8080 {
             // TODO: maybe compress ANI, XRI, ORI, and CPI?
             // ANI d8
             0xE6 => {
-                self.cc.ac = get_ac_and(self.a, self.memory[idx_pc_add1]);
-                self.a &= self.memory[idx_pc_add1];
+                let lhs = self.a;
+                let rhs = self.memory[idx_pc_add1];
+                self.a = lhs & rhs;
 
                 self.cc.z = get_z(self.a);
                 self.cc.s = get_s(self.a);
                 self.cc.p = get_p(self.a);
                 self.cc.cy = get_cy(false);
+                self.cc.ac = get_ac_and(lhs, rhs);
 
                 self.pc = self.pc.wrapping_add(1);
             }
@@ -1046,12 +1058,16 @@ impl State8080 {
             }
             // ORI d8
             0xF6 => {
-                self.a |= self.memory[idx_pc_add1];
+                let lhs = self.a;
+                let rhs = self.memory[idx_pc_add1];
+                self.a = lhs | rhs;
 
                 self.cc.z = get_z(self.a);
                 self.cc.s = get_s(self.a);
                 self.cc.p = get_p(self.a);
                 self.cc.cy = get_cy(false);
+                // bitwise OR clears AC (reference: https://retrocomputing.stackexchange.com/questions/14977/auxiliary-carry-and-the-intel-8080s-logical-instructions)
+                self.cc.ac = 0u8;
 
                 self.pc = self.pc.wrapping_add(1);
             }
@@ -1063,7 +1079,7 @@ impl State8080 {
                 self.cc.s = get_s(result);
                 self.cc.p = get_p(result);
                 self.cc.cy = get_cy(has_overflowed);
-                self.cc.ac = get_ac_sub(self.a, self.memory[idx_pc_add1]);
+                self.cc.ac = get_ac_sub(self.a, self.memory[idx_pc_add1], None);
 
                 self.pc = self.pc.wrapping_add(1);
             }
