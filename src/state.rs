@@ -413,7 +413,8 @@ impl State8080 {
             }
             // SHLD a16
             0x22 => {
-                let l_idx = ((self.memory[idx_pc_add2] as usize) << 8) | (self.memory[idx_pc_add1] as usize);
+                let l_idx = ((self.memory[idx_pc_add2] as usize) << 8)
+                    | (self.memory[idx_pc_add1] as usize);
                 let h_idx = l_idx + 1; // for readability
                 self.memory[l_idx] = self.l;
                 self.memory[h_idx] = self.h;
@@ -426,8 +427,9 @@ impl State8080 {
             }
             // LHLD D
             0x2A => {
-                let l_idx = ((self.memory[idx_pc_add2] as usize) << 8) | (self.memory[idx_pc_add1] as usize);
-                let h_idx = l_idx+1; // for readability
+                let l_idx = ((self.memory[idx_pc_add2] as usize) << 8)
+                    | (self.memory[idx_pc_add1] as usize);
+                let h_idx = l_idx + 1; // for readability
                 self.l = self.memory[l_idx];
                 self.h = self.memory[h_idx];
                 self.pc = self.pc.wrapping_add(2);
@@ -900,7 +902,38 @@ impl State8080 {
 
                 self.cc.cy = bit_holder;
             }
-            0x27 => (),                       // DAA (special)
+            // DAA (special)
+            0x27 => {
+                let mut a = self.a;
+                let mut cy = self.cc.cy;
+                let lsb = self.a & 0x0F;
+                // If the least significant four bits of the accumulator represents a number greater than 9,
+                // or if the Auxiliary Carry bit is equal to one, the accumulator is incremented by six.
+                // Otherwise, no incrementing occurs.
+                if lsb > 9 || self.cc.ac == 1 {
+                    a = a.wrapping_add(0x06);
+                }
+
+                let msb = a >> 4;
+                // If the most significant four bits of the NEW accumulator now represents a number greater than 9,
+                // or if the normal carry bit is equal to one, the most significant four bits of the accumulator are incremented by six.
+                // Otherwise, no incrementing occurs.
+                if msb > 9 || self.cc.cy == 1 {
+                    self.a = self.add(a, 0x60);
+                }
+
+                if lsb > 9 {
+                    self.cc.ac = 1;
+                } else {
+                    self.cc.ac = 0;
+                }
+
+                if msb > 9 {
+                    cy = 1;
+                }
+
+                self.cc.cy = cy; // `self.cc.cy` is modified on `self.add(lhs, rhs)`
+            }
             0x2F => self.a = !self.a,         // CMA
             0x37 => self.cc.cy = 1,           // STC
             0x3F => self.cc.cy = !self.cc.cy, // CMC
