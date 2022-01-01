@@ -168,9 +168,6 @@ impl State8080 {
         // self.memory[0x59C] = 0xC3;
         // self.memory[0x59D] = 0xC2;
         // self.memory[0x59E] = 0x05;
-
-        // TODO: what initial value of SP
-        // self.sp = 0xF000;
     }
 
     pub fn load_rom(&mut self, file_path: &String) -> Result<(), io::Error> {
